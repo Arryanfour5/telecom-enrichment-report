@@ -1,0 +1,140 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "last_activity",
+        "title": "Section 4 - Last Call / SMS",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 10.0,
+        "data": {
+            "last_records": {
+                "status": "ok",
+                "data": [
+                    {
+                        "call_type": "outgoing_sms",
+                        "direction": "outgoing",
+                        "counterpart": "919123456789",
+                        "start_time": "2025-02-09 08:47:00",
+                        "end_time": "2025-02-09 08:47:00",
+                        "duration_seconds": 0,
+                        "cell_id": "405860",
+                        "city": null,
+                        "latitude": 24.92,
+                        "longitude": 67.1
+                    },
+                    {
+                        "call_type": "incoming_call",
+                        "direction": "incoming",
+                        "counterpart": "917777666655",
+                        "start_time": "2025-02-09 07:54:00",
+                        "end_time": "2025-02-09 07:54:28",
+                        "duration_seconds": 28,
+                        "cell_id": "40489",
+                        "city": null,
+                        "latitude": 24.86,
+                        "longitude": 67.01
+                    },
+                    {
+                        "call_type": "outgoing_call",
+                        "direction": "outgoing",
+                        "counterpart": "918888777766",
+                        "start_time": "2025-02-09 06:35:00",
+                        "end_time": "2025-02-09 06:36:03",
+                        "duration_seconds": 63,
+                        "cell_id": "40489",
+                        "city": null,
+                        "latitude": 24.86,
+                        "longitude": 67.01
+                    },
+                    {
+                        "call_type": "outgoing_call",
+                        "direction": "outgoing",
+                        "counterpart": "919876543210",
+                        "start_time": "2025-02-09 06:09:00",
+                        "end_time": "2025-02-09 06:10:35",
+                        "duration_seconds": 95,
+                        "cell_id": "41122",
+                        "city": null,
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "call_type": "incoming_call",
+                        "direction": "incoming",
+                        "counterpart": "919876543210",
+                        "start_time": "2025-02-09 02:27:00",
+                        "end_time": "2025-02-09 02:30:30",
+                        "duration_seconds": 210,
+                        "cell_id": "41122",
+                        "city": null,
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "call_type": "incoming_call",
+                        "direction": "incoming",
+                        "counterpart": "919999888877",
+                        "start_time": "2025-02-08 23:09:00",
+                        "end_time": "2025-02-08 23:11:20",
+                        "duration_seconds": 140,
+                        "cell_id": "41530",
+                        "city": null,
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "call_type": "outgoing_sms",
+                        "direction": "outgoing",
+                        "counterpart": "919876543210",
+                        "start_time": "2025-02-08 20:42:00",
+                        "end_time": "2025-02-08 20:42:00",
+                        "duration_seconds": 0,
+                        "cell_id": "40977",
+                        "city": null,
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "call_type": "outgoing_call",
+                        "direction": "outgoing",
+                        "counterpart": "918888777766",
+                        "start_time": "2025-02-08 17:36:00",
+                        "end_time": "2025-02-08 17:36:45",
+                        "duration_seconds": 45,
+                        "cell_id": "40977",
+                        "city": null,
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "call_type": "outgoing_call",
+                        "direction": "outgoing",
+                        "counterpart": "917777666655",
+                        "start_time": "2025-02-08 16:49:00",
+                        "end_time": "2025-02-08 16:50:35",
+                        "duration_seconds": 95,
+                        "cell_id": "405860",
+                        "city": null,
+                        "latitude": 24.92,
+                        "longitude": 67.1
+                    },
+                    {
+                        "call_type": "outgoing_call",
+                        "direction": "outgoing",
+                        "counterpart": "919123456789",
+                        "start_time": "2025-02-08 15:59:00",
+                        "end_time": "2025-02-08 15:59:45",
+                        "duration_seconds": 45,
+                        "cell_id": "405860",
+                        "city": null,
+                        "latitude": 24.92,
+                        "longitude": 67.1
+                    }
+                ],
+                "count": 10
+            }
+        }
+    }
+}

@@ -1,0 +1,47 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "subscriber",
+        "title": "Subscriber",
+        "panel": "left",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 6.6,
+        "data": {
+            "photo": {
+                "status": "ok",
+                "data": null,
+                "note": "No photo source is configured. Map a table here when one exists."
+            },
+            "subscriber": {
+                "status": "ok",
+                "data": {
+                    "name": "Harjindar Singh",
+                    "dob": "1988-03-21",
+                    "doa": "2022-06-14",
+                    "operator": "AIRTEL",
+                    "circle": "MADHYA PRADESH",
+                    "connection_type": "Prepaid",
+                    "subscriber_status": "ACTIVE",
+                    "connection_status": "ACTIVE",
+                    "gender": "M",
+                    "father_husband_name": "Jasim Khan",
+                    "local_address": "raikera ghaghipara Bhusu, Surguja CG 497111",
+                    "permanent_address": "raikera ghaghipara Bhusu, Surguja CG 497111",
+                    "email": "harjindar.s@example.com",
+                    "imsi": "404901234567890"
+                }
+            },
+            "truecaller": {
+                "status": "ok",
+                "data": {
+                    "truecaller_name": "Harjindar S",
+                    "operator": "Airtel",
+                    "location": "Bhopal",
+                    "spam": "not_spam"
+                }
+            }
+        }
+    }
+}

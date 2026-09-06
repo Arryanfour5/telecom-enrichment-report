@@ -1,0 +1,42 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "sustel",
+        "title": "Section 8 - Sustel",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 4.9,
+        "data": {
+            "matches": {
+                "status": "ok",
+                "data": [
+                    {
+                        "idno": 1,
+                        "sssid": "SSS/2025/0771",
+                        "telno": "919812345678",
+                        "telno_alt": "919812000011",
+                        "orgcode": "ORG-MP-04",
+                        "case_name": "OP SANDSTORM",
+                        "orggroup": "CRIME BRANCH",
+                        "username": "h.singh",
+                        "teladdress": "Bhopal, MP",
+                        "country": "India",
+                        "other_information": "Primary target under lawful interception",
+                        "reference": "REF/SU/2025/0771",
+                        "refdate": "2025-01-02",
+                        "monitored": "Y",
+                        "first_sanction": "2025-01-02",
+                        "valid_till": "2025-06-30",
+                        "monitored_by": "Insp. R. Deshmukh",
+                        "group_name": "GRP-1",
+                        "officer": "Insp. R. Deshmukh",
+                        "remarks": "Active interception, renewed once"
+                    }
+                ],
+                "count": 1
+            }
+        }
+    }
+}

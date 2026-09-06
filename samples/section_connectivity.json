@@ -1,0 +1,93 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "connectivity",
+        "title": "Section 7 - Connectivity",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 24.7,
+        "data": {
+            "totals": {
+                "status": "ok",
+                "data": {
+                    "outgoing_calls": 35,
+                    "incoming_calls": 23,
+                    "outgoing_sms": 12,
+                    "incoming_sms": 10,
+                    "outgoing_duration_seconds": 5155,
+                    "incoming_duration_seconds": 3625,
+                    "distinct_counterparts": 5,
+                    "total_records": 80
+                }
+            },
+            "roaming": {
+                "status": "ok",
+                "data": [],
+                "count": 0
+            },
+            "top_counterparts": {
+                "status": "ok",
+                "data": [
+                    {
+                        "counterpart": "919876543210",
+                        "total": 23,
+                        "outgoing": 14,
+                        "incoming": 9,
+                        "sms": 5,
+                        "duration_seconds": 3322,
+                        "first_contact": "2025-02-01 16:58:00",
+                        "last_contact": "2025-02-09 06:09:00"
+                    },
+                    {
+                        "counterpart": "919123456789",
+                        "total": 21,
+                        "outgoing": 14,
+                        "incoming": 7,
+                        "sms": 4,
+                        "duration_seconds": 2452,
+                        "first_contact": "2025-02-01 11:02:00",
+                        "last_contact": "2025-02-09 08:47:00"
+                    },
+                    {
+                        "counterpart": "917777666655",
+                        "total": 14,
+                        "outgoing": 7,
+                        "incoming": 7,
+                        "sms": 3,
+                        "duration_seconds": 2191,
+                        "first_contact": "2025-02-02 00:09:00",
+                        "last_contact": "2025-02-09 07:54:00"
+                    },
+                    {
+                        "counterpart": "918888777766",
+                        "total": 12,
+                        "outgoing": 10,
+                        "incoming": 2,
+                        "sms": 5,
+                        "duration_seconds": 329,
+                        "first_contact": "2025-02-01 15:11:00",
+                        "last_contact": "2025-02-09 06:35:00"
+                    },
+                    {
+                        "counterpart": "919999888877",
+                        "total": 10,
+                        "outgoing": 2,
+                        "incoming": 8,
+                        "sms": 5,
+                        "duration_seconds": 486,
+                        "first_contact": "2025-02-01 20:13:00",
+                        "last_contact": "2025-02-08 23:09:00"
+                    }
+                ],
+                "count": 5
+            },
+            "international": {
+                "status": "ok",
+                "data": [],
+                "count": 0
+            }
+        }
+    }
+}

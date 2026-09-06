@@ -1,0 +1,164 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "cross_reference",
+        "title": "Section 10 - Cross Reference",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 75.1,
+        "data": {
+            "other_cases": {
+                "status": "ok",
+                "data": [
+                    {
+                        "case_id": "b7599dec-4132-4771-a750-6892c945b77b",
+                        "file_id": "b6faca6a-98a4-4c2d-8e3c-6b641b88ecc9",
+                        "data_source": "",
+                        "subdomain": "",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "d84513b2-7b3a-40bb-a9fc-0fb326c92ae5",
+                        "file_id": "1172a5fd-f354-46a1-8be0-0d4cedabb7b1",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "d84513b2-7b3a-40bb-a9fc-0fb326c92ae5",
+                        "file_id": "85510a15-3128-4dde-893b-89f9b3cb18af",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "d84513b2-7b3a-40bb-a9fc-0fb326c92ae5",
+                        "file_id": "b30a40eb-7b74-48f9-b40b-614bb4f9331c",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "630c97d6-0ba7-4a14-8f73-fbc9ec40d5da",
+                        "file_id": "c893c788-9606-4660-90ab-49625cb59de0",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "c73c768c-daad-44cc-8925-bd62c5a5d0d2",
+                        "file_id": "4b2a1f5e-0b63-4a27-88fc-26f712bad631",
+                        "data_source": "",
+                        "subdomain": "",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "34a50197-4ab2-4a3e-a08b-954863c89d92",
+                        "file_id": "a575a1d1-38cc-4b04-a93c-604f1476acf4",
+                        "data_source": "",
+                        "subdomain": "",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "d84513b2-7b3a-40bb-a9fc-0fb326c92ae5",
+                        "file_id": "d23f808a-a87c-4076-a8eb-1a0dbf32e198",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "f6dc88d6-4624-4cad-9f3b-58155e73bb1e",
+                        "file_id": "3348374d-fa1d-45af-8689-2a5f547db7a3",
+                        "data_source": "cdr",
+                        "subdomain": "cdr",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    },
+                    {
+                        "case_id": "d4ed6652-a7c3-4b63-9d19-b15169a35aa6",
+                        "file_id": "420d91ca-74fd-4e54-a7e5-0127a3a250a7",
+                        "data_source": "",
+                        "subdomain": "",
+                        "records": 1,
+                        "first_seen": "2025-02-10",
+                        "last_seen": "2025-02-10"
+                    }
+                ],
+                "count": 10
+            },
+            "phonebook_hits": {
+                "status": "ok",
+                "data": [
+                    {
+                        "telephone": "919812345678",
+                        "user_name": "Harjindar Singh",
+                        "place": "Bhopal",
+                        "district": "Bhopal",
+                        "state": "MADHYA PRADESH",
+                        "remarks": "Primary target handset",
+                        "reference": "REF/PB/2025/011"
+                    }
+                ],
+                "count": 1
+            },
+            "cri_hits": {
+                "status": "ok",
+                "data": [
+                    {
+                        "cri_id": "CRI/2025/0104",
+                        "crii_id": "CRII/2025/0104-A",
+                        "target_no": "917777666655",
+                        "calling_no": "917777666655",
+                        "called_no": "919812345678",
+                        "call_date": "2025-01-09 19:41:00",
+                        "call_type": "SMS",
+                        "direction": "IN",
+                        "officer": "SI K. Nair"
+                    },
+                    {
+                        "cri_id": "CRI/2025/0091",
+                        "crii_id": "CRII/2025/0091-A",
+                        "target_no": "919812345678",
+                        "calling_no": "919812345678",
+                        "called_no": "919876543210",
+                        "call_date": "2025-01-05 10:00:00",
+                        "call_type": "VOICE",
+                        "direction": "OUT",
+                        "officer": "Insp. R. Deshmukh"
+                    },
+                    {
+                        "cri_id": "CRI/2025/0091",
+                        "crii_id": "CRII/2025/0091-B",
+                        "target_no": "919812345678",
+                        "calling_no": "918888777766",
+                        "called_no": "919812345678",
+                        "call_date": "2025-01-06 14:22:00",
+                        "call_type": "VOICE",
+                        "direction": "IN",
+                        "officer": "Insp. R. Deshmukh"
+                    }
+                ],
+                "count": 3
+            }
+        }
+    }
+}

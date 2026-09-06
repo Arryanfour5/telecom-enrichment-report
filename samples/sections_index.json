@@ -1,0 +1,135 @@
+{
+    "mapping_version": 1,
+    "sections": [
+        {
+            "id": "subscriber",
+            "title": "Subscriber",
+            "panel": "left",
+            "blocks": [
+                "photo",
+                "subscriber",
+                "truecaller"
+            ]
+        },
+        {
+            "id": "name_alias",
+            "title": "Name / Alias",
+            "panel": "left",
+            "blocks": [
+                "names"
+            ]
+        },
+        {
+            "id": "sim_source",
+            "title": "SIM Brought From",
+            "panel": "left",
+            "blocks": [
+                "point_of_sale"
+            ]
+        },
+        {
+            "id": "alternate_numbers",
+            "title": "Alternate Numbers",
+            "panel": "left",
+            "blocks": [
+                "numbers"
+            ]
+        },
+        {
+            "id": "ai_insights",
+            "title": "Section 1 - AI Insights",
+            "panel": "right",
+            "blocks": [
+                "sustel_match",
+                "profiler_match",
+                "cri_match",
+                "call_forwarding",
+                "roaming_summary",
+                "city_visits",
+                "activity_span",
+                "silent_gaps"
+            ]
+        },
+        {
+            "id": "locations",
+            "title": "Section 2 - Locations",
+            "panel": "right",
+            "blocks": [
+                "day",
+                "night",
+                "during_visits"
+            ]
+        },
+        {
+            "id": "imei",
+            "title": "Section 3 - IMEI",
+            "panel": "right",
+            "blocks": [
+                "devices",
+                "imei_dim_hits"
+            ]
+        },
+        {
+            "id": "last_activity",
+            "title": "Section 4 - Last Call / SMS",
+            "panel": "right",
+            "blocks": [
+                "last_records"
+            ]
+        },
+        {
+            "id": "financial_locators",
+            "title": "Section 5 - Financial Locators",
+            "panel": "right",
+            "blocks": [
+                "bank_sms"
+            ]
+        },
+        {
+            "id": "ecommerce_locators",
+            "title": "Section 6 - E-Commerce Locators",
+            "panel": "right",
+            "blocks": [
+                "ecommerce_sms"
+            ]
+        },
+        {
+            "id": "connectivity",
+            "title": "Section 7 - Connectivity",
+            "panel": "right",
+            "blocks": [
+                "totals",
+                "roaming",
+                "top_counterparts",
+                "international"
+            ]
+        },
+        {
+            "id": "sustel",
+            "title": "Section 8 - Sustel",
+            "panel": "right",
+            "blocks": [
+                "matches"
+            ]
+        },
+        {
+            "id": "social_media",
+            "title": "Section 9 - Social Media",
+            "panel": "right",
+            "blocks": [
+                "profile",
+                "truecaller_leak"
+            ]
+        },
+        {
+            "id": "cross_reference",
+            "title": "Section 10 - Cross Reference",
+            "panel": "right",
+            "blocks": [
+                "other_cases",
+                "phonebook_hits",
+                "cri_hits"
+            ]
+        }
+    ]
+}

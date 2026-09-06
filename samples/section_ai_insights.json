@@ -1,0 +1,59 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "ai_insights",
+        "title": "Section 1 - AI Insights",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 63.6,
+        "data": {
+            "sustel_match": {
+                "status": "ok",
+                "data": 1
+            },
+            "profiler_match": {
+                "status": "ok",
+                "data": 1
+            },
+            "cri_match": {
+                "status": "ok",
+                "data": 2
+            },
+            "call_forwarding": {
+                "status": "ok",
+                "data": "not_available",
+                "note": "No call-forwarding column in the configured fact table."
+            },
+            "roaming_summary": {
+                "status": "ok",
+                "data": {
+                    "distinct_circles": 0,
+                    "roaming_records": 0,
+                    "total_records": 80
+                }
+            },
+            "city_visits": {
+                "status": "ok",
+                "data": [],
+                "count": 0
+            },
+            "activity_span": {
+                "status": "ok",
+                "data": {
+                    "first_activity": "2025-02-01",
+                    "last_activity": "2025-02-09",
+                    "active_days": 9,
+                    "span_days": 9,
+                    "silent_days": 0
+                }
+            },
+            "silent_gaps": {
+                "status": "ok",
+                "data": [],
+                "count": 0
+            }
+        }
+    }
+}

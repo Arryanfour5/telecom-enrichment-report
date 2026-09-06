@@ -1,0 +1,131 @@
+{
+    "msisdn": "919812345678",
+    "case_id": "21943083-fffd-4570-81e3-a016b13f03fd",
+    "section": {
+        "id": "locations",
+        "title": "Section 2 - Locations",
+        "panel": "right",
+        "status": "ok",
+        "failed_blocks": [],
+        "elapsed_ms": 26.7,
+        "data": {
+            "day": {
+                "status": "ok",
+                "data": [
+                    {
+                        "cell_id": "405860",
+                        "records": 12,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 24.92,
+                        "longitude": 67.1
+                    },
+                    {
+                        "cell_id": "41530",
+                        "records": 12,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "cell_id": "40489",
+                        "records": 11,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 24.86,
+                        "longitude": 67.01
+                    },
+                    {
+                        "cell_id": "41122",
+                        "records": 8,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "cell_id": "40977",
+                        "records": 6,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    }
+                ],
+                "count": 5
+            },
+            "night": {
+                "status": "ok",
+                "data": [
+                    {
+                        "cell_id": "40977",
+                        "records": 10,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "cell_id": "41122",
+                        "records": 8,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "cell_id": "405860",
+                        "records": 6,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 24.92,
+                        "longitude": 67.1
+                    },
+                    {
+                        "cell_id": "41530",
+                        "records": 4,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 0,
+                        "longitude": 0
+                    },
+                    {
+                        "cell_id": "40489",
+                        "records": 3,
+                        "address": "",
+                        "city": null,
+                        "state": null,
+                        "country": "India",
+                        "latitude": 24.86,
+                        "longitude": 67.01
+                    }
+                ],
+                "count": 5
+            },
+            "during_visits": {
+                "status": "ok",
+                "data": [],
+                "count": 0
+            }
+        }
+    }
+}
