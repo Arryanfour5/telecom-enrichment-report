@@ -25,29 +25,40 @@ may live on entirely separate ClickHouse servers.
 """
 from typing import Any, Dict, List
 
+# Tunables referenced by the queries below.
+SETTINGS: Dict[str, Any] = {
+    "day_window_start": 6,
+    "day_window_end": 20,
+    "top_n": 10,
+    "home_country_code": '91',
+}
 
-class TelecomReportMapping:
-    """Repository for the telecom enrichment report's schema mapping and queries."""
-
-    @staticmethod
-    def get_settings() -> Dict[str, Any]:
-        """Tunables referenced by the queries below."""
-        return {
-            "day_window_start": 6,        # 06:00 - 20:00 counts as "day"
-            "day_window_end": 20,
-            "top_n": 10,
-            "home_country_code": "91",
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # LEFT PANEL queries
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def subscriber_details() -> Dict[str, Any]:
-        return {
-            "description": "Core subscriber record from the SDR (subscriber data record) table",
-            "clickhouse_query": """
+# Every section of the report, in order. To add one, append a dict here -- that
+# is the only edit needed; the API picks it up with no code change.
+#
+#   id     -> URL segment for /api/v1/report/{case}/{msisdn}/section/{id}
+#   panel  -> "left" or "right" (also selects which /left or /right call it joins)
+#   blocks -> one entry per value in the section's JSON:
+#       key    -> the JSON key in the response
+#       source -> "facts" or "dims" (which ClickHouse connection to run on)
+#       kind   -> many  : list of rows
+#                 one   : single row object, or null  (add LIMIT 1)
+#                 value : first column of the first row, as a scalar
+#                 static: no SQL, returns `value` as-is
+#       sql    -> plain ClickHouse SQL. Bare table names resolve against the
+#                 connection's database; {name:Type} are bind params.
+SECTIONS: List[Dict[str, Any]] = [
+    {
+        "id": "subscriber",
+        "title": "Subscriber",
+        "panel": "left",
+        "blocks": [
+            {
+                # Core subscriber record from the SDR (subscriber data record) table
+                "key": "subscriber",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT
     `SUBSCRIBER_NAME`   AS name,
     `DOB`               AS dob,
@@ -66,26 +77,34 @@ SELECT
 FROM dim_sdr
 WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def truecaller_profile() -> Dict[str, Any]:
-        return {
-            "description": "Truecaller-reported name/operator/location/spam flag for the number",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Truecaller-reported name/operator/location/spam flag for the number
+                "key": "truecaller",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT `name` AS truecaller_name, `operator`, `location`, `spam`
 FROM dim_truecaller
 WHERE toString(`phone number`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def name_alias_sources() -> Dict[str, Any]:
-        return {
-            "description": "Every name/alias seen for the number, unioned across SDR, Truecaller, phonebook, profiler and Sustel",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "name_alias",
+        "title": "Name / Alias",
+        "panel": "left",
+        "blocks": [
+            {
+                # Every name/alias seen for the number, unioned across SDR, Truecaller,
+                # phonebook, profiler and Sustel
+                "key": "names",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT 'SDR' AS source, `SUBSCRIBER_NAME` AS value
 FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND `SUBSCRIBER_NAME` != ''
 UNION ALL
@@ -100,14 +119,21 @@ FROM dim_profiler WHERE toString(`phone number`) = {msisdn:String} AND `names` !
 UNION ALL
 SELECT 'Sustel', `username`
 FROM dim_sustel WHERE toString(`telno`) = {msisdn:String} AND `username` != ''
-            """
-        }
-
-    @staticmethod
-    def point_of_sale() -> Dict[str, Any]:
-        return {
-            "description": "Point-of-sale details for where the SIM was bought, from SDR",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "sim_source",
+        "title": "SIM Brought From",
+        "panel": "left",
+        "blocks": [
+            {
+                # Point-of-sale details for where the SIM was bought, from SDR
+                "key": "point_of_sale",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT
     `POS_CD`         AS pos_code,
     `POS_NAME`       AS pos_name,
@@ -118,31 +144,42 @@ SELECT
 FROM dim_sdr
 WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def alternate_numbers() -> Dict[str, Any]:
-        return {
-            "description": "Alternate numbers linked to this subscriber, from SDR and Sustel",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "alternate_numbers",
+        "title": "Alternate Numbers",
+        "panel": "left",
+        "blocks": [
+            {
+                # Alternate numbers linked to this subscriber, from SDR and Sustel
+                "key": "numbers",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT 'SDR' AS source, toString(`ALTERNATE_NUMBER`) AS number
 FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND toString(`ALTERNATE_NUMBER`) NOT IN ('', '0')
 UNION ALL
 SELECT 'Sustel', toString(`telnoO`)
 FROM dim_sustel WHERE toString(`telno`) = {msisdn:String} AND toString(`telnoO`) NOT IN ('', '0')
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 1: AI Insights
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def sustel_match() -> Dict[str, Any]:
-        return {
-            "description": "Sustel watchlist row(s) matching this number, with the matched number and case",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "ai_insights",
+        "title": "Section 1 - AI Insights",
+        "panel": "right",
+        "blocks": [
+            {
+                # Sustel watchlist row(s) matching this number, with the matched number
+                # and case
+                "key": "sustel_match",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT
     toString(`telno`)       AS matched_number,
     toString(`telnoO`)      AS matched_number_alt,
@@ -154,14 +191,14 @@ SELECT
     `OfficerConcerned`      AS officer
 FROM dim_sustel
 WHERE toString(`telno`) = {msisdn:String} OR toString(`telnoO`) = {msisdn:String}
-            """
-        }
-
-    @staticmethod
-    def profiler_match() -> Dict[str, Any]:
-        return {
-            "description": "Profiler row matching this number, with names and social handles",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Profiler row matching this number, with names and social handles
+                "key": "profiler_match",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT
     toString(`phone number`) AS matched_number,
     `names`        AS names,
@@ -173,14 +210,15 @@ SELECT
 FROM dim_profiler
 WHERE toString(`phone number`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def cri_match() -> Dict[str, Any]:
-        return {
-            "description": "CRI row(s) matching this number (full or last-10-digit), with the counterpart (b-party) resolved",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # CRI row(s) matching this number (full or last-10-digit), with the
+                # counterpart (b-party) resolved
+                "key": "cri_match",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT
     `tCRID`         AS cri_id,
     `tDate`         AS call_date,
@@ -193,20 +231,18 @@ WHERE toString(`tTargetNo`) = {msisdn:String}
    OR toString(`tcallingNo`) = {msisdn:String}
    OR toString(`tCalledNo`) = {msisdn:String}
    OR toString(`tRight10Target`) = right({msisdn:String}, 10)
-            """
-        }
-
-    @staticmethod
-    def call_forwarding_anomaly() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Call-forwarding related anomalies flagged by the shared anomaly "
-                "pipeline (fact_call_anomaly/dim_anomaly), matched dynamically by "
-                "name/category/type. There is no call-forwarding anomaly type in "
-                "the platform's current dim_anomaly catalog, so this returns empty "
-                "today -- it starts reporting automatically if one is added."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Call-forwarding related anomalies flagged by the shared anomaly
+                # pipeline (fact_call_anomaly/dim_anomaly), matched dynamically by
+                # name/category/type. There is no call-forwarding anomaly type in the
+                # platform's current dim_anomaly catalog, so this returns empty today --
+                # it starts reporting automatically if one is added.
+                "key": "call_forwarding",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     da.name        AS anomaly_name,
     da.category    AS anomaly_category,
@@ -222,19 +258,72 @@ WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND (da.name ILIKE '%forward%' OR da.category ILIKE '%forward%' OR da.anomaly_type ILIKE '%forward%')
 ORDER BY c.start_date_time DESC
 LIMIT {limit:UInt32}
-            """
-        }
-
-    @staticmethod
-    def cities_visited() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Distinct cities visited, resolved from every cell tower hit -- "
-                "both start_cell_id and end_cell_id, so a call that started in one "
-                "cell and ended in another counts both -- joined to dim_cell_tower "
-                "for the full address/city/state/country/lat/long."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # How many distinct circles/records show this number roaming. A record
+                # counts as roaming only when roaming_circle is set AND differs from the
+                # subscriber's home circle (dim_sdr, passed in as {home_circle:String}
+                # -- see app/service.py's _lookup_home_circle) -- a CDR that just
+                # repeats the home circle in roaming_circle is not roaming.
+                "key": "roaming_summary",
+                "source": "facts",
+                "kind": "one",
+                "sql": """
+SELECT
+    countDistinctIf(roaming_circle,
+        roaming_circle != '' AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
+    ) AS distinct_circles,
+    countIf(
+        roaming_circle != '' AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
+    ) AS roaming_records,
+    count() AS total_records
+FROM fact_call_detail
+WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
+""",
+            },
+            {
+                # Subscriber's home circle from SDR, for comparison against the
+                # roaming_summary/city_visits circles. dim_sdr lives on the `dims`
+                # connection (a different ClickHouse server than fact_call_detail's
+                # `facts` connection), so this is its own block rather than a SQL join
+                # -- results are merged in Python, never joined cross-server.
+                "key": "home_circle",
+                "source": "dims",
+                "kind": "value",
+                "sql": """
+SELECT `CIRCLE` AS circle
+FROM dim_sdr
+WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
+LIMIT 1
+""",
+            },
+            {
+                # Roaming circles actually visited (roaming_circle set AND different
+                # from the subscriber's home circle), with record counts and first/last
+                # seen dates.
+                "key": "city_visits",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
+SELECT roaming_circle AS circle, count() AS records,
+       min(call_date) AS first_seen, max(call_date) AS last_seen
+FROM fact_call_detail
+WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
+  AND roaming_circle != ''
+  AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
+GROUP BY circle ORDER BY records DESC
+""",
+            },
+            {
+                # Distinct cities visited, resolved from every cell tower hit -- both
+                # start_cell_id and end_cell_id, so a call that started in one cell and
+                # ended in another counts both -- joined to dim_cell_tower for the full
+                # address/city/state/country/lat/long.
+                "key": "cities_visited",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 WITH cell_hits AS (
     SELECT call_date, start_cell_id AS cell_id
     FROM fact_call_detail
@@ -262,76 +351,15 @@ INNER JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
 ORDER BY records DESC
-            """
-        }
-
-    @staticmethod
-    def roaming_summary() -> Dict[str, Any]:
-        return {
-            "description": (
-                "How many distinct circles/records show this number roaming. "
-                "A record counts as roaming only when roaming_circle is set AND "
-                "differs from the subscriber's home circle (dim_sdr, passed in as "
-                "{home_circle:String} -- see app/service.py's _lookup_home_circle) "
-                "-- a CDR that just repeats the home circle in roaming_circle is "
-                "not roaming."
-            ),
-            "clickhouse_query": """
-SELECT
-    countDistinctIf(roaming_circle,
-        roaming_circle != '' AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
-    ) AS distinct_circles,
-    countIf(
-        roaming_circle != '' AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
-    ) AS roaming_records,
-    count() AS total_records
-FROM fact_call_detail
-WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
-            """
-        }
-
-    @staticmethod
-    def home_circle() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Subscriber's home circle from SDR, for comparison against the "
-                "roaming_summary/city_visits circles. dim_sdr lives on the `dims` "
-                "connection (a different ClickHouse server than fact_call_detail's "
-                "`facts` connection), so this is its own block rather than a SQL "
-                "join -- results are merged in Python, never joined cross-server."
-            ),
-            "clickhouse_query": """
-SELECT `CIRCLE` AS circle
-FROM dim_sdr
-WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
-LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def city_visits() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Roaming circles actually visited (roaming_circle set AND "
-                "different from the subscriber's home circle), with record "
-                "counts and first/last seen dates."
-            ),
-            "clickhouse_query": """
-SELECT roaming_circle AS circle, count() AS records,
-       min(call_date) AS first_seen, max(call_date) AS last_seen
-FROM fact_call_detail
-WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
-  AND roaming_circle != ''
-  AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
-GROUP BY circle ORDER BY records DESC
-            """
-        }
-
-    @staticmethod
-    def activity_span() -> Dict[str, Any]:
-        return {
-            "description": "First/last activity dates, active days and silent days over the observed span",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # First/last activity dates, active days and silent days over the
+                # observed span
+                "key": "activity_span",
+                "source": "facts",
+                "kind": "one",
+                "sql": """
 SELECT
     min(call_date)                       AS first_activity,
     max(call_date)                       AS last_activity,
@@ -340,20 +368,17 @@ SELECT
     dateDiff('day', min(call_date), max(call_date)) + 1 - countDistinct(call_date) AS silent_days
 FROM fact_call_detail
 WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
-            """
-        }
-
-    @staticmethod
-    def silent_gaps() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Longest gaps with no activity between consecutive active days. "
-                "Every date-diff gap is still returned (nothing is dropped), but a "
-                "gap whose resumption day the shared anomaly pipeline actually "
-                "flagged as a silence-related anomaly is marked anomaly_flagged "
-                "and sorted first."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Longest gaps with no activity between consecutive active days. Every
+                # date-diff gap is still returned (nothing is dropped), but a gap whose
+                # resumption day the shared anomaly pipeline actually flagged as a
+                # silence-related anomaly is marked anomaly_flagged and sorted first.
+                "key": "silent_gaps",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 -- lagInFrame defaults the first row to the zero Date (1970-01-01) rather than
 -- NULL, so that row is excluded explicitly or it reports a ~20000 day "gap"
 -- before the first ever record.
@@ -386,22 +411,23 @@ WHERE g.prev_day > toDate('1970-01-02')
   AND dateDiff('day', g.prev_day, g.call_date) > 1
 ORDER BY anomaly_flagged DESC, silent_days DESC
 LIMIT {limit:UInt32}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 2: Locations
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def locations_day() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Top cell towers hit during day-window hours -- both start_cell_id "
-                "and end_cell_id, so a call that moved between cells counts both -- "
-                "with full tower detail from dim_cell_tower."
-            ),
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "locations",
+        "title": "Section 2 - Locations",
+        "panel": "right",
+        "blocks": [
+            {
+                # Top cell towers hit during day-window hours -- both start_cell_id and
+                # end_cell_id, so a call that moved between cells counts both -- with
+                # full tower detail from dim_cell_tower.
+                "key": "day",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 WITH cell_hits AS (
     SELECT c.call_date, c.start_cell_id AS cell_id
     FROM fact_call_detail AS c
@@ -429,18 +455,16 @@ SELECT
 FROM cell_hits AS h
 LEFT JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
 GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    @staticmethod
-    def locations_night() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Top cell towers hit outside day-window hours -- both start_cell_id "
-                "and end_cell_id, so a call that moved between cells counts both -- "
-                "with full tower detail from dim_cell_tower."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Top cell towers hit outside day-window hours -- both start_cell_id and
+                # end_cell_id, so a call that moved between cells counts both -- with
+                # full tower detail from dim_cell_tower.
+                "key": "night",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 WITH cell_hits AS (
     SELECT c.call_date, c.start_cell_id AS cell_id
     FROM fact_call_detail AS c
@@ -468,20 +492,18 @@ SELECT
 FROM cell_hits AS h
 LEFT JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
 GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    @staticmethod
-    def locations_during_visits() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Top cities visited, aggregated -- geo-resolved via dim_cell_tower "
-                "(both start_cell_id and end_cell_id), not the raw roaming_circle "
-                "CDR field, which is often blank. Same signal and same aggregation "
-                "level as ai_insights.cities_visited; kept here too since Section 2 "
-                "(Locations) is where a 'during visits' city ranking is expected."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Top cities visited, aggregated -- geo-resolved via dim_cell_tower
+                # (both start_cell_id and end_cell_id), not the raw roaming_circle CDR
+                # field, which is often blank. Same signal and same aggregation level as
+                # ai_insights.cities_visited; kept here too since Section 2 (Locations)
+                # is where a 'during visits' city ranking is expected.
+                "key": "during_visits",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 WITH cell_hits AS (
     SELECT c.call_date, c.start_cell_id AS cell_id
     FROM fact_call_detail AS c
@@ -509,18 +531,22 @@ INNER JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
 ORDER BY records DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 3: IMEI
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def imei_devices() -> Dict[str, Any]:
-        return {
-            "description": "Devices (IMEIs) used by this number, resolved to brand/model/type/os via TAC",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "imei",
+        "title": "Section 3 - IMEI",
+        "panel": "right",
+        "blocks": [
+            {
+                # Devices (IMEIs) used by this number, resolved to brand/model/type/os
+                # via TAC
+                "key": "devices",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     c.imei                       AS imei,
     count()                      AS records,
@@ -535,30 +561,34 @@ LEFT JOIN tac_db AS d ON d.code = toUInt32OrZero(substring(c.imei, 1, 8))
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.imei != ''
 GROUP BY imei ORDER BY records DESC
-            """
-        }
-
-    @staticmethod
-    def imei_dim_hits() -> Dict[str, Any]:
-        return {
-            "description": "IMEI watchlist hits from the LEA dim_imei table",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # IMEI watchlist hits from the LEA dim_imei table
+                "key": "imei_dim_hits",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT toString(`IMEI`) AS imei, `Case` AS case_name, `Reference` AS reference,
        `Group` AS group_name, `Analyst Name` AS analyst,
        `Brief description` AS description, `timestamp`
 FROM dim_imei
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 4: Last Call / SMS
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def last_call() -> Dict[str, Any]:
-        return {
-            "description": "The single most recent call (voice) record for this number, with resolved tower location",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "last_activity",
+        "title": "Section 4 - Last Call / SMS",
+        "panel": "right",
+        "blocks": [
+            {
+                # The single most recent call (voice) record for this number, with
+                # resolved tower location
+                "key": "last_call",
+                "source": "facts",
+                "kind": "one",
+                "sql": """
 SELECT
     c.call_type       AS call_type,
     if(c.caller = {msisdn:String}, 'outgoing', 'incoming') AS direction,
@@ -578,14 +608,15 @@ GROUP BY call_type, direction, counterpart, start_time, end_time,
          duration_seconds, cell_id
 ORDER BY start_time DESC
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def last_sms() -> Dict[str, Any]:
-        return {
-            "description": "The single most recent SMS record for this number, with resolved tower location",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # The single most recent SMS record for this number, with resolved tower
+                # location
+                "key": "last_sms",
+                "source": "facts",
+                "kind": "one",
+                "sql": """
 SELECT
     c.call_type       AS call_type,
     if(c.caller = {msisdn:String}, 'outgoing', 'incoming') AS direction,
@@ -605,14 +636,15 @@ GROUP BY call_type, direction, counterpart, start_time, end_time,
          duration_seconds, cell_id
 ORDER BY start_time DESC
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def recent_activity() -> Dict[str, Any]:
-        return {
-            "description": "Top N most recent call/SMS records combined (context around last_call/last_sms), with resolved tower location",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Top N most recent call/SMS records combined (context around
+                # last_call/last_sms), with resolved tower location
+                "key": "recent_activity",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     c.call_type       AS call_type,
     if(c.caller = {msisdn:String}, 'outgoing', 'incoming') AS direction,
@@ -631,22 +663,23 @@ GROUP BY call_type, direction, counterpart, start_time, end_time,
          duration_seconds, cell_id
 ORDER BY start_time DESC
 LIMIT {limit:UInt32}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 5/6: Financial & E-Commerce Locators
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def financial_sms() -> Dict[str, Any]:
-        return {
-            "description": (
-                "SMS from financial/bank senders, resolved via dim_sms_sender's "
-                "DLT categorization (categorization = 'Transactional') rather than "
-                "a hardcoded sender-name list."
-            ),
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "financial_locators",
+        "title": "Section 5 - Financial Locators",
+        "panel": "right",
+        "blocks": [
+            {
+                # SMS from financial/bank senders, resolved via dim_sms_sender's DLT
+                # categorization (categorization = 'Transactional') rather than a
+                # hardcoded sender-name list.
+                "key": "bank_sms",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     s.sender_name    AS sender,
     s.sender_id      AS sender_id,
@@ -660,18 +693,23 @@ WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND s.categorization = 'Transactional'
 GROUP BY sender, sender_id, category
 ORDER BY messages DESC
-            """
-        }
-
-    @staticmethod
-    def ecommerce_sms() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Call/SMS traffic from e-commerce senders, resolved via "
-                "dim_sms_sender's DLT categorization (categorization = "
-                "'Promotional') rather than a hardcoded sender-name list."
-            ),
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "ecommerce_locators",
+        "title": "Section 6 - E-Commerce Locators",
+        "panel": "right",
+        "blocks": [
+            {
+                # Call/SMS traffic from e-commerce senders, resolved via
+                # dim_sms_sender's DLT categorization (categorization = 'Promotional')
+                # rather than a hardcoded sender-name list.
+                "key": "ecommerce_sms",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     s.sender_name    AS sender,
     s.sender_id      AS sender_id,
@@ -686,18 +724,22 @@ WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND s.categorization = 'Promotional'
 GROUP BY sender, sender_id, category
 ORDER BY messages DESC
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 7: Connectivity
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def connectivity_totals() -> Dict[str, Any]:
-        return {
-            "description": "Aggregate outgoing/incoming call and SMS totals, durations and distinct counterparts",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "connectivity",
+        "title": "Section 7 - Connectivity",
+        "panel": "right",
+        "blocks": [
+            {
+                # Aggregate outgoing/incoming call and SMS totals, durations and
+                # distinct counterparts
+                "key": "totals",
+                "source": "facts",
+                "kind": "one",
+                "sql": """
 SELECT
     countIf(caller = {msisdn:String} AND call_type NOT LIKE '%sms%')   AS outgoing_calls,
     countIf(receiver = {msisdn:String} AND call_type NOT LIKE '%sms%') AS incoming_calls,
@@ -709,33 +751,32 @@ SELECT
     count()                                                            AS total_records
 FROM fact_call_detail
 WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
-            """
-        }
-
-    @staticmethod
-    def connectivity_roaming() -> Dict[str, Any]:
-        return {
-            "description": (
-                "Record counts per roaming circle -- same logic as "
-                "ai_insights.roaming_summary/city_visits: a record counts as "
-                "roaming only when roaming_circle is set AND differs from the "
-                "subscriber's home circle ({home_circle:String})."
-            ),
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Record counts per roaming circle -- same logic as
+                # ai_insights.roaming_summary/city_visits: a record counts as roaming
+                # only when roaming_circle is set AND differs from the subscriber's home
+                # circle ({home_circle:String}).
+                "key": "roaming",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT roaming_circle AS circle, count() AS records
 FROM fact_call_detail
 WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
   AND roaming_circle != ''
   AND upper(trim(roaming_circle)) != upper(trim({home_circle:String}))
 GROUP BY circle ORDER BY records DESC
-            """
-        }
-
-    @staticmethod
-    def connectivity_top_counterparts() -> Dict[str, Any]:
-        return {
-            "description": "Top counterparts by total call/SMS volume, with duration and first/last contact",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Top counterparts by total call/SMS volume, with duration and
+                # first/last contact
+                "key": "top_counterparts",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     if(caller = {msisdn:String}, receiver, caller) AS counterpart,
     count()                                        AS total,
@@ -748,14 +789,15 @@ SELECT
 FROM fact_call_detail
 WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
 GROUP BY counterpart ORDER BY total DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    @staticmethod
-    def connectivity_international() -> Dict[str, Any]:
-        return {
-            "description": "Counterparts resolved to a non-home country, i.e. international contacts",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Counterparts resolved to a non-home country, i.e. international
+                # contacts
+                "key": "international",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 SELECT
     counterpart,
     count() AS records,
@@ -770,18 +812,21 @@ FROM (
 LEFT JOIN master.dim_country_master AS m ON m.dim_country_master_id = c.dim_country_master_id
 WHERE m.country_code != {home_country:String} AND m.country_code != ''
 GROUP BY counterpart ORDER BY records DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 8: Sustel
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def sustel_matches() -> Dict[str, Any]:
-        return {
-            "description": "Full Sustel watchlist record(s) for this number",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "sustel",
+        "title": "Section 8 - Sustel",
+        "panel": "right",
+        "blocks": [
+            {
+                # Full Sustel watchlist record(s) for this number
+                "key": "matches",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT
     `IDNO` AS idno, `SSSID` AS sssid, toString(`telno`) AS telno, toString(`telnoO`) AS telno_alt,
     `orgcode`, `Case` AS case_name, `orggroup`, `username`,
@@ -792,48 +837,55 @@ SELECT
     `OfficerConcerned` AS officer, `remarks`
 FROM dim_sustel
 WHERE toString(`telno`) = {msisdn:String} OR toString(`telnoO`) = {msisdn:String}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 9: Social Media
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def social_profile() -> Dict[str, Any]:
-        return {
-            "description": "Profiler-reported social handles (Telegram/Facebook/Twitter/UPI)",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "social_media",
+        "title": "Section 9 - Social Media",
+        "panel": "right",
+        "blocks": [
+            {
+                # Profiler-reported social handles (Telegram/Facebook/Twitter/UPI)
+                "key": "profile",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT
     `names` AS names, `gender`, `addresses`,
     `telegram`, `facebook`, `twitter`, `upi`, `MNP` AS mnp_flag
 FROM dim_profiler
 WHERE toString(`phone number`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    @staticmethod
-    def social_truecaller_leak() -> Dict[str, Any]:
-        return {
-            "description": "Truecaller leak fields (name/email/operator/location/country/address/spam)",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Truecaller leak fields
+                # (name/email/operator/location/country/address/spam)
+                "key": "truecaller_leak",
+                "source": "dims",
+                "kind": "one",
+                "sql": """
 SELECT `name`, `email`, `operator`, `location`, `country`, `address`, `spam`
 FROM dim_truecaller
 WHERE toString(`phone number`) = {msisdn:String}
 LIMIT 1
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # RIGHT PANEL - Section 10: Cross Reference
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def cross_reference_other_cases() -> Dict[str, Any]:
-        return {
-            "description": "This number's activity in other cases (excludes the current case_id)",
-            "clickhouse_query": """
+""",
+            },
+        ],
+    },
+    {
+        "id": "cross_reference",
+        "title": "Section 10 - Cross Reference",
+        "panel": "right",
+        "blocks": [
+            {
+                # This number's activity in other cases (excludes the current case_id)
+                "key": "other_cases",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
 -- Columns are qualified with `c.` on purpose: ClickHouse resolves SELECT
 -- aliases inside WHERE, so a bare `case_id` there would refer to the String
 -- alias below and fail to compare against the UUID param.
@@ -851,202 +903,72 @@ WHERE (c.caller = {msisdn:String} OR c.receiver = {msisdn:String}
   AND c.case_id != {case_id:UUID}
 GROUP BY case_id, file_id, data_source, subdomain
 ORDER BY records DESC LIMIT {limit:UInt32}
-            """
-        }
-
-    @staticmethod
-    def cross_reference_phonebook_hits() -> Dict[str, Any]:
-        return {
-            "description": "Phonebook entries referencing this number",
-            "clickhouse_query": """
+""",
+            },
+            {
+                # Phonebook entries referencing this number
+                "key": "phonebook_hits",
+                "source": "dims",
+                "kind": "many",
+                "sql": """
 SELECT toString(`Telephone`) AS telephone, `User` AS user_name, `Place` AS place,
        `District` AS district, `State` AS state, `Remarks` AS remarks,
        `Reference` AS reference
 FROM dim_phonebook
 WHERE toString(`Telephone`) = {msisdn:String}
-            """
-        }
-
-    @staticmethod
-    def cross_reference_cri_hits() -> Dict[str, Any]:
-        return {
-            "description": "CRI records where this number is target, caller or called party",
-            "clickhouse_query": """
-SELECT `tCRID` AS cri_id, `tCRIID` AS crii_id, toString(`tTargetNo`) AS target_no,
-       toString(`tcallingNo`) AS calling_no, toString(`tCalledNo`) AS called_no,
-       `tDate` AS call_date, `tCallType` AS call_type,
-       `tCallDirection` AS direction, `OfficerConcerned` AS officer
-FROM dim_cri
-WHERE toString(`tTargetNo`) = {msisdn:String}
-   OR toString(`tcallingNo`) = {msisdn:String}
-   OR toString(`tCalledNo`) = {msisdn:String}
-            """
-        }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Assembly: wires the queries above into the sections/blocks shape the
-    # app (app/mapping.py) consumes.
-    # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def get_sections() -> List[Dict[str, Any]]:
-        m = TelecomReportMapping
-        return [
-            {
-                "id": "subscriber", "title": "Subscriber", "panel": "left",
-                "blocks": [
-                    # No photo source is configured yet. Map a table here and
-                    # uncomment when one exists.
-                    # {"key": "photo", "kind": "static", "value": None,
-                    #  "note": "No photo source is configured. Map a table here when one exists."},
-                    {"key": "subscriber", "source": "dims", "kind": "one",
-                     "sql": m.subscriber_details()["clickhouse_query"]},
-                    {"key": "truecaller", "source": "dims", "kind": "one",
-                     "sql": m.truecaller_profile()["clickhouse_query"]},
-                ],
+""",
             },
             {
-                "id": "name_alias", "title": "Name / Alias", "panel": "left",
-                "blocks": [
-                    {"key": "names", "source": "dims", "kind": "many",
-                     "sql": m.name_alias_sources()["clickhouse_query"]},
-                ],
+                # CRI records where this number is target, caller or called party
+                # CRI records tied to this case's actual calls: the call's
+                # counterpart (whichever of caller/receiver is not the target)
+                # is compared against the CRI's calling and called numbers, so
+                # matched_calls counts the calls with that watchlisted contact
+                # rather than every call the target made.
+                #
+                # NOTE this block joins fact_call_detail (facts) to dim_cri
+                # (dims) in one statement, so it needs both on the same
+                # connection -- hence source "facts", where dim_cri is
+                # currently reachable. If an offline deployment splits dims
+                # onto a separate server this one block fails with a warning
+                # (the rest of the report is unaffected); the dims-only
+                # ai_insights.cri_match block still works there.
+                "key": "cri_hits",
+                "source": "facts",
+                "kind": "many",
+                "sql": """
+SELECT
+    c.tCRID                AS cri_id,
+    c.tCRIID               AS crii_id,
+    toString(c.tTargetNo)  AS target_no,
+    toString(c.tcallingNo) AS calling_no,
+    toString(c.tCalledNo)  AS called_no,
+    c.tDate                AS call_date,
+    c.tCallType            AS call_type,
+    c.tCallDirection       AS direction,
+    c.OfficerConcerned     AS officer,
+    if(toString(cd.caller) IN (toString(c.tcallingNo), toString(c.tCalledNo)),
+       'caller', 'receiver')                            AS matched_party,
+    count()                                             AS matched_calls,
+    min(cd.call_date)                                   AS first_seen,
+    max(cd.call_date)                                   AS last_seen
+FROM fact_call_detail cd
+INNER JOIN dim_cri c
+    ON toString(if(cd.caller = cd.target_number, cd.receiver, cd.caller))
+       IN (toString(c.tcallingNo), toString(c.tCalledNo))
+WHERE cd.case_id = {case_id:UUID} AND cd.target_number = {msisdn:String}
+GROUP BY cri_id, crii_id, target_no, calling_no, called_no,
+         call_date, call_type, direction, officer, matched_party
+ORDER BY matched_calls DESC
+""",
             },
-            {
-                "id": "sim_source", "title": "SIM Brought From", "panel": "left",
-                "blocks": [
-                    {"key": "point_of_sale", "source": "dims", "kind": "one",
-                     "sql": m.point_of_sale()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "alternate_numbers", "title": "Alternate Numbers", "panel": "left",
-                "blocks": [
-                    {"key": "numbers", "source": "dims", "kind": "many",
-                     "sql": m.alternate_numbers()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "ai_insights", "title": "Section 1 - AI Insights", "panel": "right",
-                "blocks": [
-                    {"key": "sustel_match", "source": "dims", "kind": "many",
-                     "sql": m.sustel_match()["clickhouse_query"]},
-                    {"key": "profiler_match", "source": "dims", "kind": "one",
-                     "sql": m.profiler_match()["clickhouse_query"]},
-                    {"key": "cri_match", "source": "dims", "kind": "many",
-                     "sql": m.cri_match()["clickhouse_query"]},
-                    {"key": "call_forwarding", "source": "facts", "kind": "many",
-                     "sql": m.call_forwarding_anomaly()["clickhouse_query"]},
-                    {"key": "roaming_summary", "source": "facts", "kind": "one",
-                     "sql": m.roaming_summary()["clickhouse_query"]},
-                    {"key": "home_circle", "source": "dims", "kind": "value",
-                     "sql": m.home_circle()["clickhouse_query"]},
-                    {"key": "city_visits", "source": "facts", "kind": "many",
-                     "sql": m.city_visits()["clickhouse_query"]},
-                    {"key": "cities_visited", "source": "facts", "kind": "many",
-                     "sql": m.cities_visited()["clickhouse_query"]},
-                    {"key": "activity_span", "source": "facts", "kind": "one",
-                     "sql": m.activity_span()["clickhouse_query"]},
-                    {"key": "silent_gaps", "source": "facts", "kind": "many",
-                     "sql": m.silent_gaps()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "locations", "title": "Section 2 - Locations", "panel": "right",
-                "blocks": [
-                    {"key": "day", "source": "facts", "kind": "many",
-                     "sql": m.locations_day()["clickhouse_query"]},
-                    {"key": "night", "source": "facts", "kind": "many",
-                     "sql": m.locations_night()["clickhouse_query"]},
-                    {"key": "during_visits", "source": "facts", "kind": "many",
-                     "sql": m.locations_during_visits()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "imei", "title": "Section 3 - IMEI", "panel": "right",
-                "blocks": [
-                    {"key": "devices", "source": "facts", "kind": "many",
-                     "sql": m.imei_devices()["clickhouse_query"]},
-                    {"key": "imei_dim_hits", "source": "dims", "kind": "many",
-                     "sql": m.imei_dim_hits()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "last_activity", "title": "Section 4 - Last Call / SMS", "panel": "right",
-                "blocks": [
-                    {"key": "last_call", "source": "facts", "kind": "one",
-                     "sql": m.last_call()["clickhouse_query"]},
-                    {"key": "last_sms", "source": "facts", "kind": "one",
-                     "sql": m.last_sms()["clickhouse_query"]},
-                    {"key": "recent_activity", "source": "facts", "kind": "many",
-                     "sql": m.recent_activity()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "financial_locators", "title": "Section 5 - Financial Locators", "panel": "right",
-                "blocks": [
-                    {"key": "bank_sms", "source": "facts", "kind": "many",
-                     "sql": m.financial_sms()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "ecommerce_locators", "title": "Section 6 - E-Commerce Locators", "panel": "right",
-                "blocks": [
-                    {"key": "ecommerce_sms", "source": "facts", "kind": "many",
-                     "sql": m.ecommerce_sms()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "connectivity", "title": "Section 7 - Connectivity", "panel": "right",
-                "blocks": [
-                    {"key": "totals", "source": "facts", "kind": "one",
-                     "sql": m.connectivity_totals()["clickhouse_query"]},
-                    {"key": "roaming", "source": "facts", "kind": "many",
-                     "sql": m.connectivity_roaming()["clickhouse_query"]},
-                    {"key": "top_counterparts", "source": "facts", "kind": "many",
-                     "sql": m.connectivity_top_counterparts()["clickhouse_query"]},
-                    {"key": "international", "source": "facts", "kind": "many",
-                     "sql": m.connectivity_international()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "sustel", "title": "Section 8 - Sustel", "panel": "right",
-                "blocks": [
-                    {"key": "matches", "source": "dims", "kind": "many",
-                     "sql": m.sustel_matches()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "social_media", "title": "Section 9 - Social Media", "panel": "right",
-                "blocks": [
-                    {"key": "profile", "source": "dims", "kind": "one",
-                     "sql": m.social_profile()["clickhouse_query"]},
-                    {"key": "truecaller_leak", "source": "dims", "kind": "one",
-                     "sql": m.social_truecaller_leak()["clickhouse_query"]},
-                ],
-            },
-            {
-                "id": "cross_reference", "title": "Section 10 - Cross Reference", "panel": "right",
-                "blocks": [
-                    {"key": "other_cases", "source": "facts", "kind": "many",
-                     "sql": m.cross_reference_other_cases()["clickhouse_query"]},
-                    {"key": "phonebook_hits", "source": "dims", "kind": "many",
-                     "sql": m.cross_reference_phonebook_hits()["clickhouse_query"]},
-                    {"key": "cri_hits", "source": "dims", "kind": "many",
-                     "sql": m.cross_reference_cri_hits()["clickhouse_query"]},
-                ],
-            },
-        ]
-
-    @staticmethod
-    def get_mapping() -> Dict[str, Any]:
-        """Load the full mapping: settings and sections."""
-        return {
-            "version": 1,
-            "settings": TelecomReportMapping.get_settings(),
-            "sections": TelecomReportMapping.get_sections(),
-        }
-
+        ],
+    },
+]
 
 # app/mapping.py imports this file by path and reads MAPPING off it.
-MAPPING = TelecomReportMapping.get_mapping()
+MAPPING: Dict[str, Any] = {
+    "version": 1,
+    "settings": SETTINGS,
+    "sections": SECTIONS,
+}
