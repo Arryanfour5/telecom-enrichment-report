@@ -89,8 +89,8 @@ on the full report `sections=<id>` repeated to select a subset.
 
 Left panel: `subscriber`, `name_alias`, `sim_source`, `alternate_numbers`.
 
-Right panel: `ai_insights` (1), `locations` (2), `imei` (3), `last_activity` (4),
-`financial_locators` (5), `ecommerce_locators` (6), `connectivity` (7),
+Right panel: `ai_insights` (1), `locations` (2), `imei` (3), `last_activity` (4, with `last_call`, `last_sms`, `last_p2p_sms` and `recent_activity`),
+`financial_locators` (5), `ecommerce_locators` (6), `connectivity` (7, incl. `top_b_party_locations` / `least_b_party_locations` -- 2 rows each, set by `b_party_locations_limit`),
 `sustel` (8), `social_media` (9), `cross_reference` (10).
 
 ## Response shape
@@ -118,6 +118,62 @@ an LLM as-is.
 One mismapped table degrades a single block rather than failing the report: the
 block's value is `null` and a top-level `warnings` array appears naming the
 section, block and ClickHouse error. It is absent entirely when nothing failed.
+
+## IPDR report
+
+The IPDR quick report (`/api/v1/ipdr/...`) is the same service with its own mapping file,
+`config/ipdr_report_mapping.py` (`IPDR_MAPPING`-style contract: a module-level `MAPPING` dict; the path is
+`IPDR_MAPPING_FILE`, default `config/ipdr_report_mapping.py`). An IPDR record is an internet session
+(`fact_internet_sessions`) and the number it belongs to is its `device_id`; facts are matched on the **last 10 digits**
+of the number.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/ipdr/sections` | Configured sections and block keys |
+| GET | `/api/v1/ipdr/mapping` | The mapping's settings (thresholds, domain lists) |
+| GET | `/api/v1/ipdr/report/{case_id}/{msisdn}` | Full report. `sections=<id>` (repeat) picks sections |
+| GET | `/api/v1/ipdr/report/{case_id}/{msisdn}/left` | Subscriber, Name / Alias, SIM bought from, Alternate numbers |
+| GET | `/api/v1/ipdr/report/{case_id}/{msisdn}/right` | Header and every right-panel section |
+| GET | `/api/v1/ipdr/report/{case_id}/{msisdn}/section/{id}` | One section |
+
+`ref`, `ref_date`, `input_gist`, `analysed_by`, `period_requested_from` and `period_requested_to` are query parameters
+on the full report and `/right`: they are not in ClickHouse, so they are echoed in `header` (null when not given).
+`header` also carries `analysed_on`, `ipdr_period.actual` (first / last session, sessions, days with data, files) and
+`top_place` (the city with the most sessions).
+
+Right-panel sections, in the client's order: `ai_insights` (file-wise internet usage level, Sustel connectivity,
+international roaming, frequent roaming by circle, city visits, last IPDR date), `locations` (day, night, international,
+international cities - with latitude / longitude and date range), `imei`, `imsi`, `connectivity` (B-party numbers with
+their SDR city), `applications_used`, `vpn_usage`, `tor_usage`, `bittorrent_usage`, `hotspot_usage`, `websites_used`,
+`b_party_resolution`, `sustel`, `social_media`, `cross_reference`.
+
+**Reuse.** The left panel, the social-media blocks and the Sustel records read the LEA `dim_*` tables by number
+(`dim_sdr`, `dim_truecaller`, `dim_profiler`, `dim_sustel`, ...), which the CDR and IPDR reports share; the IPDR
+mapping loads `report_mapping.py` from the same folder and takes those blocks from it. Everything that reads call
+records is written again against `fact_internet_sessions`.
+
+**Two-step lookups.** `app/service.py` (`build_ipdr_params`) first reads the resolved B-party numbers (facts), then which
+of them are on Sustel (dims), then the handsets' IMEIs, and passes them to the dims queries as bind parameters:
+facts and dims may be on different servers, so they are never joined in SQL.
+
+**What decides each section**
+
+- *Applications used / VoIP-tagged apps*: the application the session's destination IP + port has in
+  `master.dim_application` (loaded by `scripts/setup_application_master.py` in the ingestion repo).
+- *VPN*: `vpn_name` (`master.dim_vpn`, on a high-end port); a MaxMind-only VPN hit is listed as "provider not named".
+- *TOR*: `is_tor` (`master.dim_tor`, IP + port) or an exit-node address. *BitTorrent*: `master.dim_bittorrent`.
+- *Internet usage level*: megabytes per ACTIVE day of each file against `usage_low_mb_per_day` (100) and
+  `usage_high_mb_per_day` (1024). **Provisional thresholds - confirm with the client.**
+- *Hotspot (tethering)*: an IPDR record does not say "tethering", so `hotspot_usage.indicators` lists indicators only:
+  sessions the concurrent-connections detector flagged, and access-point names containing tether / hotspot / mobap.
+- *Websites used*: IPDR has no URLs, so a site is recognised by the destination IP's AS domain (exact match against
+  `ecommerce_domains` / `financial_domains`). Cloud and CDN domains (AWS, CloudFront, Akamai, Google ...) cannot be told
+  apart from the shops hosted on them, so they are listed apart in `shared_hosting` and never counted as e-commerce.
+- *International roaming / cities / locations*: the serving cell id resolved through `dim_cell_tower` (country, city,
+  latitude, longitude); "international" is any country other than `home_country_name`.
+- *VoIP calls* (`connectivity.voip_by_country`, `connectivity.voip_calls`): sessions with `fact_internet_sessions.voip_call_type` set (`whatsapp_call`, `telegram_call`, `instagram_call`, ...), inferred by the ingestion's AppInferenceEngine. Needs a database that has ingested an IPDR file since the column shipped.
+
+The test suite runs without a database: `PYTHONPATH=. python -m pytest tests -q` (needs `httpx` and `pytest`).
 
 ## Run locally
 

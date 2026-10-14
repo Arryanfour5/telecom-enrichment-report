@@ -102,7 +102,7 @@ WHERE cd.case_id = '{case_id}'"""
 # Fixed: same column-count mismatch as the profiler query.
 TRUECALLER_SQL = """SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    tc.id, tc.`phone number`, tc.name, tc.email, tc.operator, tc.location, tc.country, tc.address, tc.spam
+    tc.id, tc.`phone number`, tc.name, tc.email, tc.operator, tc.location, tc.country, tc.address, tc.`spam score`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
 INNER JOIN dim_truecaller tc ON tc.id = toInt64(m.dim_truecaller_id)
@@ -110,26 +110,25 @@ WHERE cd.case_id = '{case_id}'
 UNION ALL
 SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    tc.id, tc.`phone number`, tc.name, tc.email, tc.operator, tc.location, tc.country, tc.address, tc.spam
+    tc.id, tc.`phone number`, tc.name, tc.email, tc.operator, tc.location, tc.country, tc.address, tc.`spam score`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
 INNER JOIN dim_truecaller tc ON tc.id = toInt64(m.dim_truecaller_id)
 WHERE cd.case_id = '{case_id}'"""
 
-# Fixed: joined on m.dim_imei_legacy_id, which does not exist. The mapping
-# tables' column is dim_imei_id (renamed with the table, dim_imei_legacy ->
-# dim_imei). Left as a_party only, as supplied.
+# Joined on m.dim_imei_legacy_id (the mapping tables' bridge column for
+# dim_imei_legacy). a_party only, as supplied.
 IMEI_SQL = """SELECT
     cd.case_id, cd.call_id, cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number, cd.imei,
-    im.id, im.IMEI, im.`Case`, im.Reference, im.`Group`, im.`Analyst Name`, im.`Brief description`, im.timestamp
+    im.id, im.IMEI, im.`Case Reference`, im.`Group`, im.`Analyst Name`, im.`Brief description`, im.timestamp
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
-INNER JOIN dim_imei im ON im.id = toInt64(m.dim_imei_id)
+INNER JOIN dim_imei_legacy im ON im.id = toInt64(m.dim_imei_legacy_id)
 WHERE cd.case_id = '{case_id}'"""
 
 MNP_SQL = """SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    n.id, n.Code, n.`Service Provider`, n.Circle, n.`date of dim_mnp`
+    n.id, n.code, n.`service provider`, n.circle, n.`date of MNP`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
 INNER JOIN dim_mnp n ON n.id = toInt64(m.dim_mnp_id)
@@ -137,7 +136,7 @@ WHERE cd.case_id = '{case_id}'
 UNION ALL
 SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    n.id, n.Code, n.`Service Provider`, n.Circle, n.`date of dim_mnp`
+    n.id, n.code, n.`service provider`, n.circle, n.`date of MNP`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
 INNER JOIN dim_mnp n ON n.id = toInt64(m.dim_mnp_id)
@@ -145,18 +144,18 @@ WHERE cd.case_id = '{case_id}'"""
 
 MSC_SQL = """SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    ms.id, ms.Code, ms.`Service Provider`, ms.Circle
+    ms.id, ms.code, ms.`service provider`, ms.circle
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
-INNER JOIN dim_MSC ms ON ms.id = toInt64(m.dim_msc_id)
+INNER JOIN dim_msc ms ON ms.id = toInt64(m.dim_msc_id)
 WHERE cd.case_id = '{case_id}'
 UNION ALL
 SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    ms.id, ms.Code, ms.`Service Provider`, ms.Circle
+    ms.id, ms.code, ms.`service provider`, ms.circle
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
-INNER JOIN dim_MSC ms ON ms.id = toInt64(m.dim_msc_id)
+INNER JOIN dim_msc ms ON ms.id = toInt64(m.dim_msc_id)
 WHERE cd.case_id = '{case_id}'"""
 
 TEMPLATES = [
@@ -191,7 +190,7 @@ TEMPLATES = [
     {
         "name": "IMEI Enrichment for Case Calls",
         "description": (
-            "Case calls whose A party maps to a dim_imei record, pairing the handset "
+            "Case calls whose A party maps to a dim_imei_legacy record, pairing the handset "
             "IMEI seen in the CDR with the analyst's IMEI dossier -- case, reference, "
             "group, analyst and description."
         ),
@@ -209,7 +208,7 @@ TEMPLATES = [
     {
         "name": "MSC Enrichment for Case Calls",
         "description": (
-            "Case calls joined to dim_MSC for either party, resolving the mobile "
+            "Case calls joined to dim_msc for either party, resolving the mobile "
             "switching centre code to its service provider and circle."
         ),
         "sql": MSC_SQL,

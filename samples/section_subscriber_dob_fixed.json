@@ -1,0 +1,19 @@
+{
+  "msisdn": "919812345678",
+  "case_id": "1f2d1cb7-37bb-4f00-a4fe-e9fdf8d8fb61",
+  "subscriber": {
+    "photo": {
+      "photo_base64": "iVBORw0KGgoAAAANSUhEUgAAAYwAAAHICAYAAABd...<truncated base64>",
+      "photo_mime_type": "image/png"
+    },
+    "subscriber": {
+      "name": "Harjindar Singh",
+      "dob": "1988-03-21",
+      "doa": "2022-06-14",
+      "operator": "AIRTEL",
+      "circle": "MADHYA PRADESH",
+      "connection_type": "Prepaid",
+      "truecaller_name": "Harjindar S"
+    }
+  }
+}

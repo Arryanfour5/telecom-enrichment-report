@@ -1,0 +1,201 @@
+{
+  "msisdn": "919812345678",
+  "case_id": "1f2d1cb7-37bb-4f00-a4fe-e9fdf8d8fb61",
+  "connectivity": {
+    "totals": {
+      "outgoing_calls": 519,
+      "incoming_calls": 453,
+      "outgoing_sms": 72,
+      "incoming_sms": 629,
+      "outgoing_duration_seconds": 120620,
+      "incoming_duration_seconds": 123816,
+      "distinct_counterparts": 224,
+      "total_records": 1673
+    },
+    "roaming": [
+      {
+        "circle": "AIR TN",
+        "records": 1610
+      },
+      {
+        "circle": "AIR JK",
+        "records": 34
+      },
+      {
+        "circle": "AIR DL",
+        "records": 29
+      }
+    ],
+    "top_counterparts": [
+      {
+        "counterpart": "919876543210",
+        "total": 262,
+        "outgoing": 112,
+        "incoming": 150,
+        "sms": 0,
+        "duration_seconds": 71736,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "AT-AIRTEL-S",
+        "total": 157,
+        "outgoing": 0,
+        "incoming": 157,
+        "sms": 157,
+        "duration_seconds": 0,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "918888777766",
+        "total": 142,
+        "outgoing": 52,
+        "incoming": 90,
+        "sms": 0,
+        "duration_seconds": 24124,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "919123456789",
+        "total": 131,
+        "outgoing": 82,
+        "incoming": 49,
+        "sms": 0,
+        "duration_seconds": 13039,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "917777666655",
+        "total": 70,
+        "outgoing": 49,
+        "incoming": 21,
+        "sms": 0,
+        "duration_seconds": 11835,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "AD-Airtel-S",
+        "total": 54,
+        "outgoing": 0,
+        "incoming": 54,
+        "sms": 54,
+        "duration_seconds": 0,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "AT-AIRMCA-S",
+        "total": 52,
+        "outgoing": 0,
+        "incoming": 52,
+        "sms": 52,
+        "duration_seconds": 0,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "BT-INDBNK-S",
+        "total": 31,
+        "outgoing": 0,
+        "incoming": 31,
+        "sms": 31,
+        "duration_seconds": 0,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "916265109924",
+        "total": 31,
+        "outgoing": 18,
+        "incoming": 13,
+        "sms": 0,
+        "duration_seconds": 19181,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      },
+      {
+        "counterpart": "Airtel-S",
+        "total": 30,
+        "outgoing": 0,
+        "incoming": 30,
+        "sms": 30,
+        "duration_seconds": 0,
+        "first_contact": "1970-01-01 00:00:00",
+        "last_contact": "1970-01-01 00:00:00"
+      }
+    ],
+    "international": [],
+    "top_b_party_locations": [
+      {
+        "target_number": "919812345678",
+        "b_party_location": "12 Model Town, Ludhiana PB 141002",
+        "b_party_circle": "PUNJAB",
+        "records": 262,
+        "distinct_b_parties": 1,
+        "b_parties": [
+          "919876543210"
+        ],
+        "imei": "359892183302022",
+        "imeis": [
+          "868234056123478",
+          "351756051523999",
+          "356938112087654",
+          "359892183302022"
+        ]
+      },
+      {
+        "target_number": "919812345678",
+        "b_party_location": "7 Civil Lines, Jabalpur MP 482001",
+        "b_party_circle": "MADHYA PRADESH",
+        "records": 142,
+        "distinct_b_parties": 1,
+        "b_parties": [
+          "918888777766"
+        ],
+        "imei": "356938112087654",
+        "imeis": [
+          "356938112087654",
+          "359892183302022"
+        ]
+      }
+    ],
+    "least_b_party_locations": [
+      {
+        "target_number": "919812345678",
+        "b_party_location": "221 Hazratganj, Lucknow UP 226001",
+        "b_party_circle": "UTTAR PRADESH",
+        "records": 70,
+        "distinct_b_parties": 1,
+        "b_parties": [
+          "917777666655"
+        ],
+        "imei": "359892183302022",
+        "imeis": [
+          "351756051523999",
+          "356938112087654",
+          "359892183302022"
+        ]
+      },
+      {
+        "target_number": "919812345678",
+        "b_party_location": "Flat 3, MG Road, Pune MH 411001",
+        "b_party_circle": "MAHARASHTRA",
+        "records": 131,
+        "distinct_b_parties": 1,
+        "b_parties": [
+          "919123456789"
+        ],
+        "imei": "359892183302022",
+        "imeis": [
+          "868234056123478",
+          "356938112087654",
+          "359892183302022"
+        ]
+      }
+    ]
+  }
+}

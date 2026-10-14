@@ -1,0 +1,84 @@
+{
+  "msisdn": "919812345678",
+  "case_id": "1f2d1cb7-37bb-4f00-a4fe-e9fdf8d8fb61",
+  "last_activity": {
+    "last_call": {
+      "call_type": "incoming_call",
+      "direction": "incoming",
+      "counterpart": "917659454343",
+      "start_time": "2026-06-02 21:39:36",
+      "end_time": "2026-06-02 21:41:47",
+      "duration_seconds": 131,
+      "cell_id": "4044042183166723349",
+      "address": "43 st.antony's third street",
+      "city": "Chennai",
+      "latitude": 13.16831,
+      "longitude": 80.20227
+    },
+    "last_sms": {
+      "call_type": "incoming_sms",
+      "direction": "incoming",
+      "counterpart": "919432333256",
+      "start_time": "2026-06-01 19:04:20",
+      "end_time": "2026-06-01 19:04:20",
+      "duration_seconds": 0,
+      "cell_id": "4044042183166723349",
+      "address": "43 st.antony's third street",
+      "city": "Chennai",
+      "latitude": 13.16831,
+      "longitude": 80.20227
+    },
+    "last_p2p_sms": {
+      "call_type": "incoming_sms",
+      "direction": "incoming",
+      "counterpart": "919432333256",
+      "start_time": "2026-06-01 19:04:20",
+      "cell_id": "4044042183166723349",
+      "address": "43 st.antony's third street",
+      "city": "Chennai",
+      "latitude": 13.16831,
+      "longitude": 80.20227
+    },
+    "recent_activity": [
+      {
+        "call_type": "incoming_call",
+        "direction": "incoming",
+        "counterpart": "917659454343",
+        "start_time": "2026-06-02 21:39:36",
+        "end_time": "2026-06-02 21:41:47",
+        "duration_seconds": 131,
+        "cell_id": "4044042183166723349",
+        "address": "43 st.antony's third street",
+        "city": "Chennai",
+        "latitude": 13.16831,
+        "longitude": 80.20227
+      },
+      {
+        "call_type": "outgoing_call",
+        "direction": "outgoing",
+        "counterpart": "917614506730",
+        "start_time": "2026-06-01 22:45:10",
+        "end_time": "2026-06-01 22:45:46",
+        "duration_seconds": 36,
+        "cell_id": "4044042183166723349",
+        "address": "43 st.antony's third street",
+        "city": "Chennai",
+        "latitude": 13.16831,
+        "longitude": 80.20227
+      },
+      {
+        "call_type": "outgoing_call",
+        "direction": "outgoing",
+        "counterpart": "917212036830",
+        "start_time": "2026-06-01 21:12:40",
+        "end_time": "2026-06-01 21:15:47",
+        "duration_seconds": 187,
+        "cell_id": "4044042183166723349",
+        "address": "43 st.antony's third street",
+        "city": "Chennai",
+        "latitude": 13.16831,
+        "longitude": 80.20227
+      }
+    ]
+  }
+}

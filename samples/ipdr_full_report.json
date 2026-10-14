@@ -1,0 +1,505 @@
+{
+  "msisdn": "919812345678",
+  "case_id": "cde8b9cd-55bb-46ef-ad4c-b4cd09554bda",
+  "generated_at": "2026-10-10T09:34:32Z",
+  "header": {
+    "top_place": {
+      "place": "Karachi",
+      "state": "Sindh",
+      "country": "Pakistan",
+      "latitude": 24.8607,
+      "longitude": 67.0011,
+      "sessions": 2,
+      "cells": 2,
+      "first_seen": "2025-05-10 06:00:00",
+      "last_seen": "2025-05-10 07:00:00"
+    },
+    "ref": "CASE-2026-114",
+    "ref_date": "2026-10-10",
+    "input_gist": "Sample IPDR request",
+    "analysed_by": "Insp. Sample",
+    "analysed_on": "2026-10-10T09:34:32Z",
+    "ipdr_period": {
+      "requested": {
+        "from": "2025-05-01",
+        "to": "2025-05-31"
+      },
+      "actual": {
+        "msisdn": "919812345678",
+        "actual_from": "2025-05-10 06:00:00",
+        "actual_to": "2025-05-10 11:00:00",
+        "sessions": 6,
+        "days_with_data": 1,
+        "files": 1
+      }
+    }
+  },
+  "subscriber": {
+    "photo": {
+      "photo_base64": "<702380 base64 characters omitted from this sample>",
+      "photo_mime_type": "image/png"
+    },
+    "subscriber": {
+      "name": "Harjindar Singh",
+      "dob": "1988-03-21",
+      "doa": "2022-06-14",
+      "operator": "AIRTEL",
+      "circle": "TAMIL NADU",
+      "connection_type": "Prepaid",
+      "truecaller_name": "Harjindar S"
+    }
+  },
+  "name_alias": {
+    "names": [
+      {
+        "source": "Phonebook",
+        "value": "Harjindar Singh"
+      },
+      {
+        "source": "Profiler",
+        "value": "Harjindar Singh; Harjindar S"
+      },
+      {
+        "source": "SDR",
+        "value": "Harjindar Singh"
+      },
+      {
+        "source": "Truecaller",
+        "value": "Harjindar S"
+      },
+      {
+        "source": "Sustel",
+        "value": "h.singh"
+      }
+    ]
+  },
+  "sim_brought_from": {
+    "point_of_sale": {
+      "pos_address": "MG Road, Bhopal"
+    }
+  },
+  "alternate_numbers": {
+    "numbers": [
+      {
+        "source": "Sustel",
+        "number": "919812000011"
+      },
+      {
+        "source": "SDR",
+        "number": "919812000011"
+      }
+    ]
+  },
+  "ai_insights": {
+    "internet_usage": [
+      {
+        "file_id": "3ea9eba6-2617-4297-9227-5b6441a944a5",
+        "period_from": "2025-05-10 06:00:00",
+        "period_to": "2025-05-10 11:00:00",
+        "sessions": 6,
+        "active_days": 1,
+        "total_mb": 9287.23,
+        "avg_daily_mb": 9287.2,
+        "usage_level": "high"
+      }
+    ],
+    "sustel_hits": [
+      {
+        "matched_last10": "9812345678",
+        "case_name": "OP SANDSTORM",
+        "monitored": "Y",
+        "match_type": "target"
+      }
+    ],
+    "sustel_connectivity": [],
+    "international_roaming": [
+      {
+        "country": "Pakistan",
+        "sessions": 4,
+        "serving_cells": 4,
+        "cities": [
+          "Lahore",
+          "Islamabad",
+          "Karachi"
+        ],
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 11:00:00"
+      }
+    ],
+    "frequent_roaming": [],
+    "city_visits": [
+      {
+        "city": "Karachi",
+        "state": "Sindh",
+        "country": "Pakistan",
+        "sessions": 2,
+        "visit_days": 1,
+        "cells": 2,
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 07:00:00"
+      },
+      {
+        "city": "Islamabad",
+        "state": "Islamabad Capital Territory",
+        "country": "Pakistan",
+        "sessions": 1,
+        "visit_days": 1,
+        "cells": 1,
+        "first_seen": "2025-05-10 11:00:00",
+        "last_seen": "2025-05-10 11:00:00"
+      },
+      {
+        "city": "Lahore",
+        "state": "Punjab",
+        "country": "Pakistan",
+        "sessions": 1,
+        "visit_days": 1,
+        "cells": 1,
+        "first_seen": "2025-05-10 08:00:00",
+        "last_seen": "2025-05-10 08:00:00"
+      }
+    ],
+    "last_ipdr_date": "2025-05-10"
+  },
+  "locations": {
+    "day": [
+      {
+        "cell_id": "410033001300001",
+        "city": "Islamabad",
+        "state": "Islamabad Capital Territory",
+        "country": "Pakistan",
+        "latitude": 33.6844,
+        "longitude": 73.0479,
+        "sessions": 1,
+        "first_seen": "2025-05-10 11:00:00",
+        "last_seen": "2025-05-10 11:00:00"
+      },
+      {
+        "cell_id": "410011001100002",
+        "city": "Karachi",
+        "state": "Sindh",
+        "country": "Pakistan",
+        "latitude": 24.8138,
+        "longitude": 67.03,
+        "sessions": 1,
+        "first_seen": "2025-05-10 07:00:00",
+        "last_seen": "2025-05-10 07:00:00"
+      },
+      {
+        "cell_id": "410012001200001",
+        "city": "Lahore",
+        "state": "Punjab",
+        "country": "Pakistan",
+        "latitude": 31.5204,
+        "longitude": 74.3587,
+        "sessions": 1,
+        "first_seen": "2025-05-10 08:00:00",
+        "last_seen": "2025-05-10 08:00:00"
+      },
+      {
+        "cell_id": "410011001100001",
+        "city": "Karachi",
+        "state": "Sindh",
+        "country": "Pakistan",
+        "latitude": 24.8607,
+        "longitude": 67.0011,
+        "sessions": 1,
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 06:00:00"
+      },
+      {
+        "cell_id": "9999999999999",
+        "city": "",
+        "state": "",
+        "country": "India",
+        "latitude": 13.0827,
+        "longitude": 80.2707,
+        "sessions": 1,
+        "first_seen": "2025-05-10 10:00:00",
+        "last_seen": "2025-05-10 10:00:00"
+      },
+      {
+        "cell_id": "404906101241122819",
+        "city": "",
+        "state": "",
+        "country": "India",
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "sessions": 1,
+        "first_seen": "2025-05-10 09:00:00",
+        "last_seen": "2025-05-10 09:00:00"
+      }
+    ],
+    "night": [],
+    "international": [
+      {
+        "country": "Pakistan",
+        "sessions": 4,
+        "serving_cells": 4,
+        "cities": [
+          "Lahore",
+          "Islamabad",
+          "Karachi"
+        ],
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 11:00:00"
+      }
+    ],
+    "international_cities": [
+      {
+        "city": "Karachi",
+        "country": "Pakistan",
+        "latitude": 24.8607,
+        "longitude": 67.0011,
+        "sessions": 2,
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 07:00:00"
+      },
+      {
+        "city": "Islamabad",
+        "country": "Pakistan",
+        "latitude": 33.6844,
+        "longitude": 73.0479,
+        "sessions": 1,
+        "first_seen": "2025-05-10 11:00:00",
+        "last_seen": "2025-05-10 11:00:00"
+      },
+      {
+        "city": "Lahore",
+        "country": "Pakistan",
+        "latitude": 31.5204,
+        "longitude": 74.3587,
+        "sessions": 1,
+        "first_seen": "2025-05-10 08:00:00",
+        "last_seen": "2025-05-10 08:00:00"
+      }
+    ]
+  },
+  "imei": {
+    "devices": [
+      {
+        "imei": "351000000000000",
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 11:00:00",
+        "sessions": 6,
+        "brand": "",
+        "model": "",
+        "device_type": "",
+        "os": ""
+      }
+    ],
+    "imei_dim_hits": []
+  },
+  "imsi": {
+    "subscribers": [
+      {
+        "imsi": "404011234567890",
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 11:00:00",
+        "sessions": 6,
+        "imei": "351000000000000",
+        "brand": "",
+        "model": ""
+      }
+    ]
+  },
+  "connectivity": {
+    "b_party_locations": []
+  },
+  "applications_used": {
+    "applications": [
+      {
+        "application": "WhatsApp",
+        "sessions": 3,
+        "first_seen": "2025-05-10 06:00:00",
+        "last_seen": "2025-05-10 08:00:00",
+        "total_mb": 4643.62
+      },
+      {
+        "application": "Telegram",
+        "sessions": 1,
+        "first_seen": "2025-05-10 11:00:00",
+        "last_seen": "2025-05-10 11:00:00",
+        "total_mb": 1547.87
+      }
+    ],
+    "totals": {
+      "sessions": 6,
+      "resolved_sessions": 4,
+      "unresolved_sessions": 2
+    }
+  },
+  "vpn_usage": {
+    "names": [],
+    "sessions": []
+  },
+  "tor_usage": {
+    "names": [],
+    "sessions": []
+  },
+  "bittorrent_usage": {
+    "names": [],
+    "sessions": []
+  },
+  "hotspot_usage": {
+    "indicators": []
+  },
+  "websites_used": {
+    "ecommerce_locators": [],
+    "financial_locators": [],
+    "shared_hosting": []
+  },
+  "b_party_resolution": {
+    "numbers": []
+  },
+  "sustel": {
+    "matches": [
+      {
+        "idno": 1,
+        "sssid": "SSS/2025/0771",
+        "telno": "919812345678",
+        "telno_alt": "919812000011",
+        "orgcode": "ORG-MP-04",
+        "case_name": "OP SANDSTORM",
+        "orggroup": "CRIME BRANCH",
+        "username": "h.singh",
+        "teladdress": "Bhopal, MP",
+        "country": "India",
+        "other_information": "Primary target under lawful interception",
+        "reference": "REF/SU/2025/0771",
+        "refdate": "2025-01-02 00:00:00",
+        "monitored": "Y",
+        "first_sanction": "2025-01-02 00:00:00",
+        "valid_till": "2025-06-30 00:00:00",
+        "monitored_by": "Insp. R. Deshmukh",
+        "group_name": "GRP-1",
+        "officer": "Insp. R. Deshmukh",
+        "remarks": "Active interception, renewed once",
+        "match_type": "target"
+      }
+    ]
+  },
+  "social_media": {
+    "profile": {
+      "names": "Harjindar Singh; Harjindar S",
+      "gender": "M",
+      "addresses": "raikera ghaghipara Bhusu, Surguja CG; Bhopal MP",
+      "telegram": "@harjindar_s",
+      "facebook": "fb.com/harjindar.singh",
+      "twitter": "@harjindar_s",
+      "upi": "harjindar@ybl",
+      "mnp_flag": "N"
+    },
+    "truecaller_leak": {
+      "name": "Harjindar S",
+      "email": "harjindar.s@example.com",
+      "operator": "Airtel",
+      "location": "Bhopal",
+      "country": "India",
+      "address": "Bhopal, MP",
+      "spam_score": "not_spam"
+    }
+  },
+  "cross_reference": {
+    "other_cases": [
+      {
+        "case_id": "2430df71-31cb-4802-af07-341b38929c09",
+        "file_id": "fa84d586-d71f-4895-a1e6-5d76f12cabde",
+        "data_source": "IPDR",
+        "records": 202,
+        "first_seen": "2025-05-01",
+        "last_seen": "2025-05-14"
+      },
+      {
+        "case_id": "69ec9461-35c1-4f76-a367-6199263865d7",
+        "file_id": "647889a9-07fb-480b-a0e8-9b97b60bfe87",
+        "data_source": "IPDR",
+        "records": 6,
+        "first_seen": "2025-05-10",
+        "last_seen": "2025-05-10"
+      }
+    ],
+    "other_cases_cdr": [
+      {
+        "case_id": "0e84c5ac-2a40-40a4-9b68-993782e47cdc",
+        "file_id": "8c8893e8-6daf-406f-9a17-1e581ac82545",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "58106b1f-a811-4b44-99a3-318d956883b4",
+        "file_id": "4e1906c1-8b21-436c-9e33-739c68b8af52",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "5910c002-4a99-4aaa-b2c2-c8dfe11b33e0",
+        "file_id": "f45e6ad1-17d5-4c79-a04a-076ed402cb43",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "bbafcaba-717f-4626-bd3c-60a0d8e4e120",
+        "file_id": "cfab14c0-3e14-40d0-80e8-ef86709904fd",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "422fb606-a1a1-418c-b810-e6e8ead22180",
+        "file_id": "eefe8d8f-8132-4ad4-a0ea-0656ad688cfc",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "f4655d3e-e44c-4179-9698-ac3eef1eb62b",
+        "file_id": "64d2ab11-6161-4057-9a57-a9efe6e45675",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "078fae08-9064-4b1c-9dd4-c4874d87de73",
+        "file_id": "3cdfd49e-7230-456f-8c38-7f7da23b5842",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "36b409cd-50db-4b03-ac94-ea20b3f72005",
+        "file_id": "8e508fa4-244e-436a-a9d7-c4e6a442d8aa",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "808cee36-6b7a-46ae-8a91-14a2c11a0113",
+        "file_id": "8b47334c-bd9e-46d6-8769-c385d3f8d449",
+        "data_source": "cdr",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      },
+      {
+        "case_id": "c29ed01f-ba14-4604-8665-75191272c9aa",
+        "file_id": "18b846f7-fb1a-4456-87c7-58a844d1b5bb",
+        "data_source": "CDR",
+        "records": 1673,
+        "first_seen": "2026-01-01",
+        "last_seen": "2026-06-30"
+      }
+    ]
+  }
+}

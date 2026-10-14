@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     mapping_file: Path = Path("config/report_mapping.py")
+    # The IPDR report (GET /api/v1/ipdr/report/...): its own mapping file, same contract as the CDR one.
+    ipdr_mapping_file: Path = Path("config/ipdr_report_mapping.py")
 
     # `facts` connection - fact_call_detail, tac_db, cell towers, sms senders.
     # Queries in the mapping file use bare table names, so the database is set
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
 
     # `dims` connection - the LEA dim_* tables. May be a different server, which
     # is why sections declare a source instead of assuming one database.
-    ch_dims_url: str = "http://192.168.1.13:8124"
+    ch_dims_url: str = "http://192.168.1.13:8123"
     ch_dims_database: str = "analytics"
     ch_dims_user: str = "user"
     ch_dims_password: str = ""
