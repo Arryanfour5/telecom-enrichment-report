@@ -1,6 +1,7 @@
 """Loads the mapping file and turns it into resolved, ready-to-run sections."""
 
 import importlib.util
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,41 @@ class Mapping:
         return next((s for s in self.sections if s.id == section_id), None)
 
 
+def caf_table() -> str:
+    """The operator CAF, fully qualified: <CH_ENRICHED_DATABASE>.customer_application_form."""
+    from app.config import settings
+    database = settings.ch_enriched_database
+    if not re.fullmatch(r"[A-Za-z0-9_]+", database or ""):
+        raise MappingError(f"CH_ENRICHED_DATABASE {database!r} is not a plain database name")
+    return f"`{database}`.customer_application_form"
+
+
+def reference_database() -> str:
+    """CH_REFERENCE_DATABASE, checked to be a plain name (it is written into the Sustel / phone book / CRI subqueries)."""
+    from app.config import settings
+    database = settings.ch_reference_database
+    if not re.fullmatch(r"[A-Za-z0-9_]+", database or ""):
+        raise MappingError(f"CH_REFERENCE_DATABASE {database!r} is not a plain database name")
+    return database
+
+
+def resolve_tokens(sql: Optional[str]) -> Optional[str]:
+    """Fill the tokens a mapping file writes instead of a database name: __CAF__ -> the enriched CAF table;
+    __SUSTEL__ / __PHONEBOOK__ / __CRI__ -> scout_reference's tables under the legacy dim_* column names (app/lea_reference.py);
+    __CELL_TOWER__ -> analytics.dim_cell_tower with every column converted to one type (app/cell_tower_source.py)."""
+    if not sql or "__" not in sql:
+        return sql
+    if "__CELL_TOWER__" in sql:
+        from app import cell_tower_source
+        sql = cell_tower_source.expand(sql)
+    if "__CAF__" in sql:
+        sql = sql.replace("__CAF__", caf_table())
+    if any(t in sql for t in ("__SUSTEL__", "__PHONEBOOK__", "__CRI__")):
+        from app import lea_reference
+        sql = lea_reference.resolve(sql, reference_database())
+    return sql
+
+
 def _load_raw_mapping(path: Path) -> Dict[str, Any]:
     """Import the mapping file as a Python module and pull out its MAPPING dict.
 
@@ -74,7 +110,7 @@ def load_mapping(path: Path) -> Mapping:
         blocks = []
         for b in s.get("blocks") or []:
             kind = b.get("kind", "many")
-            sql = b.get("sql")
+            sql = resolve_tokens(b.get("sql"))
             if kind != "static" and not sql:
                 raise MappingError(f"section '{s['id']}' block '{b['key']}' has no sql")
             blocks.append(Block(

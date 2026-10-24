@@ -29,6 +29,26 @@ class Settings(BaseSettings):
     ch_dims_user: str = "user"
     ch_dims_password: str = ""
 
+    # The enriched layer, where the operator CAF lives (<db>.customer_application_form, written by the ingestion service's CAF
+    # pipeline). On the `dims` server. The mapping file names the table as __CAF__; app/mapping.py fills in this database, so
+    # it is never written into a query. Must match the ingestion service's LAYERS_DB_PREFIX + LAYERS_ENRICHED_DB.
+    ch_enriched_database: str = "scout_enriched"
+
+    # The reference layer, where Sustel, phone book and CRI live (<db>.sustel / phonebook / cri, written by the ingestion
+    # service's Access pipeline; the one source of Sustel, phone book and CRI). On the `dims` server. The
+    # mapping files name them __SUSTEL__ / __PHONEBOOK__ / __CRI__ (app/lea_reference.py). Must match the ingestion service's
+    # LAYERS_DB_PREFIX + LAYERS_REFERENCE_DB.
+    ch_reference_database: str = "scout_reference"
+
+    # Postgres (the case-management database): the report header's Ref / Ref date / Input gist / Analysed by come from
+    # `cases` and the requested / actual period from `telecom_metadata` (app/pg.py). Override with the PG_* env vars.
+    pg_host: str = "192.168.1.14"
+    pg_port: int = 5432
+    pg_user: str = "scout"
+    pg_password: str = "scout"
+    pg_database: str = "scout"
+    pg_connect_timeout_seconds: int = 5
+
     query_timeout_seconds: int = 30
     default_limit: int = 10
 

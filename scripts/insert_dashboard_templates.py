@@ -61,13 +61,22 @@ CREATE TABLE IF NOT EXISTS public."saved-analysis" (
 );
 """
 
+# Phone book entries are scout_reference.phonebook (the Access ingestion's table, current rows only), not
+# analytics.dim_phonebook: the bridge's dim_phonebook_id is the entry's phonebook_id. Same output columns as before.
+_PHONEBOOK = """(
+    SELECT phonebook_id AS id, telephone AS Telephone, user_name AS User, place AS Place, district AS District,
+           state AS State, country AS Country, remarks AS Remarks, reference AS Reference, toDate(ref_date) AS Date,
+           entry_date AS `Date of entry`
+    FROM scout_reference.phonebook FINAL WHERE `_is_deleted` = 0
+)"""
+
 PHONEBOOK_SQL = """SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
     pb.id, pb.Telephone, pb.User, pb.Place, pb.District, pb.State, pb.Country, pb.Remarks, pb.Reference,
     pb.Date, pb.`Date of entry`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
-INNER JOIN dim_phonebook pb ON pb.id = toInt64(m.dim_phonebook_id)
+INNER JOIN """ + _PHONEBOOK + """ pb ON pb.id = m.dim_phonebook_id
 WHERE cd.case_id = '{case_id}'
 UNION ALL
 SELECT
@@ -76,7 +85,7 @@ SELECT
     pb.Date, pb.`Date of entry`
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
-INNER JOIN dim_phonebook pb ON pb.id = toInt64(m.dim_phonebook_id)
+INNER JOIN """ + _PHONEBOOK + """ pb ON pb.id = m.dim_phonebook_id
 WHERE cd.case_id = '{case_id}'"""
 
 # Fixed: the b_party half as supplied also selected cd.case_id and cd.call_id,
@@ -142,28 +151,34 @@ INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
 INNER JOIN dim_mnp n ON n.id = toInt64(m.dim_mnp_id)
 WHERE cd.case_id = '{case_id}'"""
 
+# MSC codes are master.dim_msc_master (5-digit code ranges, coai.com), not analytics.dim_msc: the bridge's dim_msc_id is the
+# start of the range holding the party's MSC code (digits 3-7 of the 91-prefixed number). The party's code must lie in the
+# range too, so two ranges that start on the same code never both attach to a call.
 MSC_SQL = """SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    ms.id, ms.code, ms.`service provider`, ms.circle
+    ms.msc_code_start, ms.msc_code_end, ms.operator_name, ms.telecom_circle, ms.mnc
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_a_party m ON m.call_id = cd.call_id
-INNER JOIN dim_msc ms ON ms.id = toInt64(m.dim_msc_id)
+INNER JOIN master.dim_msc_master ms ON toUInt64(ms.msc_code_start) = m.dim_msc_id
 WHERE cd.case_id = '{case_id}'
+  AND toUInt32OrZero(substring(cd.target_number, 3, 5)) BETWEEN ms.msc_code_start AND ms.msc_code_end
 UNION ALL
 SELECT
     cd.caller, cd.receiver, cd.call_type, cd.call_date, cd.duration, cd.target_number,
-    ms.id, ms.code, ms.`service provider`, ms.circle
+    ms.msc_code_start, ms.msc_code_end, ms.operator_name, ms.telecom_circle, ms.mnc
 FROM fact_call_detail cd
 INNER JOIN sub_fact_mapping_b_party m ON m.call_id = cd.call_id
-INNER JOIN dim_msc ms ON ms.id = toInt64(m.dim_msc_id)
-WHERE cd.case_id = '{case_id}'"""
+INNER JOIN master.dim_msc_master ms ON toUInt64(ms.msc_code_start) = m.dim_msc_id
+WHERE cd.case_id = '{case_id}'
+  AND toUInt32OrZero(substring(if(cd.caller = cd.target_number, cd.receiver, cd.caller), 3, 5))
+      BETWEEN ms.msc_code_start AND ms.msc_code_end"""
 
 TEMPLATES = [
     {
         "name": "Phonebook Enrichment for Case Calls",
         "description": (
-            "Every call in the case whose A party or B party matches a dim_phonebook "
-            "entry, with the phonebook record attached -- name, place, district, state, "
+            "Every call in the case whose A party or B party matches a phone book "
+            "entry (scout_reference.phonebook), with the phonebook record attached -- name, place, district, state, "
             "remarks and reference. Shows which parties in the case are already known "
             "contacts and where they are recorded."
         ),
@@ -208,8 +223,8 @@ TEMPLATES = [
     {
         "name": "MSC Enrichment for Case Calls",
         "description": (
-            "Case calls joined to dim_msc for either party, resolving the mobile "
-            "switching centre code to its service provider and circle."
+            "Case calls joined to master.dim_msc_master for either party, resolving the "
+            "mobile switching centre code range to its operator, circle and MNC."
         ),
         "sql": MSC_SQL,
     },

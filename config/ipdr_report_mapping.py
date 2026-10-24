@@ -7,7 +7,8 @@ module-level MAPPING dict in the shape app/mapping.py loads.
 
 WHAT IS REUSED, WHAT IS NOT
 ---------------------------
-The LEA reference tables (dim_sdr, dim_truecaller, dim_sustel, dim_profiler, dim_phonebook, dim_caf, ...) are shared by
+The LEA reference tables (dim_sdr, dim_truecaller, dim_profiler, ...; Sustel / phone book / CRI are scout_reference's, written __SUSTEL__ /
+__PHONEBOOK__ / __CRI__; the CAF is scout_enriched.customer_application_form) are shared by
 the CDR and IPDR reports: they are keyed by phone number / IMEI, not by the kind of record. The blocks that only read
 them by `{msisdn}` (subscriber, photo, names, point of sale, alternate numbers, social profile, Truecaller leak) are taken
 from report_mapping.py itself, loaded by path from the same folder, so a corrected query there is corrected here too.
@@ -57,7 +58,7 @@ _IMEI = "replaceAll(replaceAll(ifNull(f.imei, ''), '`', ''), char(39), '')"
 _CELLS = """(
     SELECT cell_id, any(ifNull(city, '')) AS city, any(ifNull(state, '')) AS state, any(country) AS country,
            nullIf(any(latitude), 0) AS latitude, nullIf(any(longitude), 0) AS longitude
-    FROM dim_cell_tower
+    FROM __CELL_TOWER__
     WHERE cell_id IN (SELECT cell_id FROM fact_internet_sessions AS f WHERE """ + _OF_NUMBER + """)
     GROUP BY cell_id
 )"""
@@ -79,7 +80,7 @@ class IPDRReportMapping:
 
     @staticmethod
     def get_databases() -> Dict[str, str]:
-        return {"facts": "analytics", "dims": "analytics", "master": "master"}
+        return {"facts": "analytics", "dims": "analytics", "master": "master", "reference": "scout_reference"}
 
     @staticmethod
     def get_tables() -> Dict[str, str]:
@@ -90,9 +91,9 @@ class IPDRReportMapping:
             "ip_dim": "{facts}.dim_ip_address",
             "cell_tower": "{facts}.dim_cell_tower",
             "call_detail": "{facts}.fact_call_detail",
-            "application": "{master}.dim_application",
+            "application": "{master}.dim_application_master",    # destination IP range -> application (ip_start..ip_end); the port plays no part
             "tac": "master.Tac_DB_master",
-            "sdr": "{dims}.dim_sdr", "sustel": "{dims}.dim_sustel", "profiler": "{dims}.dim_profiler",
+            "sdr": "{dims}.dim_sdr", "sustel": "{reference}.sustel", "profiler": "{dims}.dim_profiler",
             "truecaller": "{dims}.dim_truecaller", "imei": "{dims}.dim_imei_legacy",
         }
 
@@ -215,7 +216,7 @@ SELECT
     `Case`                         AS case_name,
     `monitored`                    AS monitored,
     if(right(toString(`telno`), 10) = right({msisdn:String}, 10), 'target', 'b_party') AS match_type
-FROM dim_sustel
+FROM __SUSTEL__
 WHERE right(toString(`telno`), 10) = right({msisdn:String}, 10)
    OR right(toString(`telno`), 10) IN {counterparts_last10:Array(String)}
             """
@@ -596,7 +597,7 @@ LIMIT {events_limit:UInt32}
     @staticmethod
     def vpn_summary() -> Dict[str, Any]:
         return {
-            "description": "VPN usage: the VPN's name (master.dim_vpn, on a high-end port) with first / last use and sessions; MaxMind-only hits are listed as 'provider not named'.",
+            "description": "VPN usage: the VPN provider the ingestion stored (vpn_name: community VPN list, else IP2Proxy; 'Unidentified VPN' when neither names it), on a VPN port, with first / last use and sessions.",
             "clickhouse_query": IPDRReportMapping._usage_summary(IPDRReportMapping._VPN_COND, IPDRReportMapping._VPN_NAME),
         }
 
@@ -610,7 +611,7 @@ LIMIT {events_limit:UInt32}
     @staticmethod
     def tor_summary() -> Dict[str, Any]:
         return {
-            "description": "TOR usage: destination IP + port in the TOR database (master.dim_tor), or an exit-node address, with first / last use.",
+            "description": "TOR usage: the destination IP is a Tor exit node (exact IP, any port) or an IP2Proxy TOR address, as the ingestion stored it (is_tor), with first / last use.",
             "clickhouse_query": IPDRReportMapping._usage_summary(IPDRReportMapping._TOR_COND, IPDRReportMapping._TOR_NAME),
         }
 
@@ -736,6 +737,45 @@ LIMIT {limit:UInt32}
         }
 
     @staticmethod
+    def b_party_sdr() -> Dict[str, Any]:
+        return {
+            "description": (
+                "SDR subscriber name of each resolved B-party number (last 10 digits), when there is an SDR record. app/service.py merges it into "
+                "B Party Resolution's `numbers` rows as `b_party_name` and drops this block."
+            ),
+            "clickhouse_query": """
+SELECT right(toString(`SUBSCRIBER_NUMBER`), 10) AS b_party_number,
+       any(`SUBSCRIBER_NAME`) AS subscriber_name
+FROM dim_sdr
+WHERE right(toString(`SUBSCRIBER_NUMBER`), 10) IN {counterparts_last10:Array(String)}
+GROUP BY b_party_number
+ORDER BY b_party_number
+LIMIT 500
+            """
+        }
+
+    @staticmethod
+    def b_party_sustel() -> Dict[str, Any]:
+        return {
+            "description": (
+                "Sustel watchlist records of each resolved B-party number (last 10 digits, on either of the record's two numbers): the case and "
+                "whether it is monitored. app/service.py merges it into B Party Resolution's `numbers` rows as `sustel` / `sustel_match` / `b_party_sustel_match` and drops this "
+                "block; the full record is in the Sustel Details section (`sustel.matches`, match_type 'b_party'), which reads the same numbers."
+            ),
+            "clickhouse_query": """
+SELECT number AS b_party_number, `Case` AS case_name, `monitored` AS monitored
+FROM (
+    SELECT arrayJoin([right(toString(`telno`), 10), right(toString(`telno0`), 10)]) AS number, `Case`, `monitored`
+    FROM __SUSTEL__
+)
+WHERE number IN {counterparts_last10:Array(String)}
+GROUP BY number, case_name, monitored
+ORDER BY number, case_name
+LIMIT 500
+            """
+        }
+
+    @staticmethod
     def sustel_matches() -> Dict[str, Any]:
         return {
             "description": "Full Sustel watchlist record(s) for this number or any resolved B-party number (last 10 digits).",
@@ -749,7 +789,7 @@ SELECT
     s.Monitorby AS monitored_by, s.`Group` AS group_name,
     s.OfficerConcerned AS officer, s.remarks,
     if(right(toString(s.telno), 10) = right({msisdn:String}, 10), 'target', 'b_party') AS match_type
-FROM dim_sustel AS s
+FROM __SUSTEL__ AS s
 WHERE right(toString(s.telno), 10) = right({msisdn:String}, 10)
    OR right(toString(s.telno0), 10) = right({msisdn:String}, 10)
    OR right(toString(s.telno), 10) IN {counterparts_last10:Array(String)}
@@ -872,6 +912,9 @@ LIMIT {limit:UInt32}
             ]},
             {"id": "b_party_resolution", "title": "Section 11 - B Party Resolution", "panel": "right", "blocks": [
                 block("numbers", "facts", "many", m.b_party_numbers()),
+                # looked up on the dims connection and merged into `numbers` by app/service.py (sdr_match / sdr, sustel_match / sustel)
+                block("sdr", "dims", "many", m.b_party_sdr()),
+                block("sustel", "dims", "many", m.b_party_sustel()),
             ]},
             {"id": "sustel", "title": "Section 12 - Sustel Details", "panel": "right", "blocks": [
                 block("matches", "dims", "many", m.sustel_matches()),

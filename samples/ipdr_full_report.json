@@ -350,7 +350,24 @@
     "shared_hosting": []
   },
   "b_party_resolution": {
-    "numbers": []
+    "numbers": [
+      {
+        "b_party_number": "919731456208",
+        "resolved_as": "P2P Session",
+        "sessions": 1,
+        "first_seen": "2026-07-01 21:30:30",
+        "last_seen": "2026-07-01 21:30:30",
+        "b_party_name": "Karthik Menon",
+        "sustel_match": true,
+        "b_party_sustel_match": true,
+        "sustel": [
+          {
+            "case_name": "OP KESTREL",
+            "monitored": "Y"
+          }
+        ]
+      }
+    ]
   },
   "sustel": {
     "matches": [

@@ -11,7 +11,8 @@ from fastapi import FastAPI, HTTPException, Query
 from app.config import settings
 from app.db import get_client
 from app.mapping import Mapping, MappingError, load_mapping
-from app.service import build_ipdr_params, build_params, run_ipdr_report, run_panel, run_report, run_section
+from app.service import (build_ipdr_params, build_params, run_combined_report, run_ipdr_report, run_panel, run_report,
+                         run_section)
 
 app = FastAPI(title=settings.api_title, root_path=settings.api_root_path, version="1.0.0")
 
@@ -92,6 +93,7 @@ def show_mapping():
         "databases": {
             "facts": settings.ch_facts_database,
             "dims": settings.ch_dims_database,
+            "enriched": settings.ch_enriched_database,
         },
         "settings": mapping.settings,
     }
@@ -138,6 +140,14 @@ def get_report(case_id: str, msisdn: str,
     return run_report(get_mapping(), msisdn, case_id, limit, sections)
 
 
+@app.get("/api/v1/full-report/{case_id}/{msisdn}")
+def get_full_report(case_id: str, msisdn: str, limit: Optional[int] = Query(None, ge=1, le=1000)):
+    """The CDR report and the IPDR report of the number in one response: `{msisdn, case_id, generated_at, cdr, ipdr}`.
+    Each part has its own `header` (Ref, Ref date, Input gist, Analysed by, Analysed on, period requested / actual),
+    read from Postgres."""
+    return run_combined_report(get_mapping(), get_ipdr_mapping(), msisdn, case_id, limit)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # IPDR report: the same layout of endpoints under /api/v1/ipdr, with its own mapping file.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,7 +169,8 @@ def show_ipdr_mapping():
     """What the API resolved the IPDR mapping file to - the settings (thresholds, domain lists) a deployment can tune."""
     mapping = get_ipdr_mapping()
     return {"version": mapping.version,
-            "databases": {"facts": settings.ch_facts_database, "dims": settings.ch_dims_database},
+            "databases": {"facts": settings.ch_facts_database, "dims": settings.ch_dims_database,
+                          "enriched": settings.ch_enriched_database},
             "settings": mapping.settings}
 
 

@@ -81,6 +81,7 @@ cross-server SQL join is ever attempted.
 | GET | `/api/v1/report/{case_id}/{msisdn}/left` | All left-panel sections (subscriber, name_alias, sim_source, alternate_numbers) |
 | GET | `/api/v1/report/{case_id}/{msisdn}/right` | All right-panel sections (ai_insights through cross_reference) |
 | GET | `/api/v1/report/{case_id}/{msisdn}` | Full report (left + right panel) |
+| GET | `/api/v1/full-report/{case_id}/{msisdn}` | The CDR report and the IPDR report in one response: `{msisdn, case_id, generated_at, cdr, ipdr}` |
 
 Optional query params: `limit` (row cap for list blocks, all of the above), and
 on the full report `sections=<id>` repeated to select a subset.
@@ -119,6 +120,28 @@ One mismapped table degrades a single block rather than failing the report: the
 block's value is `null` and a top-level `warnings` array appears naming the
 section, block and ClickHouse error. It is absent entirely when nothing failed.
 
+## Report header (Postgres)
+
+The CDR report (full report and right panel) and the IPDR report (right panel and full report) start with a `header`:
+Ref, Ref date, Input gist, Analysed by, Analysed on and the period requested / actual (`cdr_period` or `ipdr_period`).
+These are not in ClickHouse; `app/pg.py` reads them from the case-management Postgres (`PG_HOST`, `PG_PORT` 5432,
+`PG_USER`, `PG_PASSWORD`, `PG_DATABASE`):
+
+| Header field | Source |
+|---|---|
+| Ref / Ref date | `cases.reference_name` / `cases.reference_date` |
+| Input gist | `cases.description` (`cases.notes` when empty) |
+| Analysed by | `cases.officer_name` |
+| Analysed on | the time the report was generated |
+| Period requested | `telecom_metadata.period_start` / `period_end` of the number's files |
+| Period actual | `telecom_metadata.actual_start` / `actual_end` of the number's files |
+
+The files of a number are told apart by `files.subdomain` (`cdr` / `ipdr`); several files of one kind give the earliest
+start and the latest end. The number is matched on its last 10 digits. If Postgres is down the report still comes back, the
+header fields are null and a `warnings` entry (`section: header, block: postgres`) says why. On the IPDR endpoints a
+`ref`, `ref_date`, `input_gist`, `analysed_by`, `period_requested_from` / `period_requested_to` query parameter overrides
+the Postgres value.
+
 ## IPDR report
 
 The IPDR quick report (`/api/v1/ipdr/...`) is the same service with its own mapping file,
@@ -147,10 +170,16 @@ international cities - with latitude / longitude and date range), `imei`, `imsi`
 their SDR city), `applications_used`, `vpn_usage`, `tor_usage`, `bittorrent_usage`, `hotspot_usage`, `websites_used`,
 `b_party_resolution`, `sustel`, `social_media`, `cross_reference`.
 
-**Reuse.** The left panel, the social-media blocks and the Sustel records read the LEA `dim_*` tables by number
-(`dim_sdr`, `dim_truecaller`, `dim_profiler`, `dim_sustel`, ...), which the CDR and IPDR reports share; the IPDR
+**Reuse.** The left panel, the social-media blocks and the Sustel records read the LEA reference tables by number
+(`dim_sdr`, `dim_truecaller`, `dim_profiler`, Sustel, ...), which the CDR and IPDR reports share; the IPDR
 mapping loads `report_mapping.py` from the same folder and takes those blocks from it. Everything that reads call
 records is written again against `fact_internet_sessions`.
+
+**Sustel, phone book, CRI, MSC.** Sustel, phone book and CRI are `scout_reference.sustel` / `phonebook` / `cri` (the ingestion
+service's Access pipeline), not `analytics.dim_sustel` / `dim_phonebook` / `dim_cri`. Queries write `__SUSTEL__` / `__PHONEBOOK__` /
+`__CRI__`; `app/mapping.py` swaps in the subqueries of `app/lea_reference.py`, which show those tables under the legacy column names,
+so the queries are unchanged. Database: `CH_REFERENCE_DATABASE` (default `scout_reference`, on the `dims` server). MSC codes are
+`master.dim_msc_master` (code ranges), not `analytics.dim_msc`.
 
 **Two-step lookups.** `app/service.py` (`build_ipdr_params`) first reads the resolved B-party numbers (facts), then which
 of them are on Sustel (dims), then the handsets' IMEIs, and passes them to the dims queries as bind parameters:
@@ -158,10 +187,16 @@ facts and dims may be on different servers, so they are never joined in SQL.
 
 **What decides each section**
 
-- *Applications used / VoIP-tagged apps*: the application the session's destination IP + port has in
-  `master.dim_application` (loaded by `scripts/setup_application_master.py` in the ingestion repo).
-- *VPN*: `vpn_name` (`master.dim_vpn`, on a high-end port); a MaxMind-only VPN hit is listed as "provider not named".
-- *TOR*: `is_tor` (`master.dim_tor`, IP + port) or an exit-node address. *BitTorrent*: `master.dim_bittorrent`.
+- *B party resolution*: each resolved B-party number (`numbers`: how it resolved, `P2P Session` / `P2A Session`, the sessions and when) also carries
+  `b_party_name` (the SDR subscriber name, null when the number has no SDR record), `sustel_match` / `b_party_sustel_match` (true when the number is on
+  Sustel, matched on the last 10 digits of either of the record's two numbers; null when the Sustel look-up failed) and `sustel` (the case and whether it is
+  monitored, null when there is none). The full Sustel record is in the Sustel Details section (`sustel.matches`, `match_type` `b_party`). The two look-ups are
+  dims queries merged into the facts rows in Python (`app/service.py`), because dims and facts may be on different servers.
+- *Applications used / VoIP-tagged apps*: the application of the IP range the session's destination IP is in (the port plays no part), in
+  `master.dim_application_master` (IP ranges; loaded by `deployment_scripts/<date>/ingest_dim_application_master.py` in the ingestion repo).
+- *VPN*: `vpn_name`, set by the ingestion from the community VPN list, else IP2Proxy, on a VPN port (`Unidentified VPN` when neither names the provider).
+- *TOR*: `is_tor`, set by the ingestion when the destination IP is a Tor exit node (exact IP) or an IP2Proxy TOR address. *BitTorrent*: `master.dim_bittorrent`.
+  MaxMind is not used for VPN / TOR (the ingestion's `deployment_scripts/2026-10-21/ingest_anonymizer_masters.py` loads the lists).
 - *Internet usage level*: megabytes per ACTIVE day of each file against `usage_low_mb_per_day` (100) and
   `usage_high_mb_per_day` (1024). **Provisional thresholds - confirm with the client.**
 - *Hotspot (tethering)*: an IPDR record does not say "tethering", so `hotspot_usage.indicators` lists indicators only:

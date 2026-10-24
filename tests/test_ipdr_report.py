@@ -119,6 +119,10 @@ class FakeClient:
         if "f.b_party_number AS b_party_number" in sql:
             return [{"b_party_number": "919886142073", "resolved_as": "P2P Session", "sessions": 3},
                     {"b_party_number": "919000000001", "resolved_as": "P2P Session", "sessions": 1}]
+        if "AS subscriber_name" in sql:                                             # the SDR look-up of the B-party numbers
+            return [{"b_party_number": "9886142073", "subscriber_name": "Karthik Menon"}]
+        if "arrayJoin([right(toString(`telno`)" in sql:                             # the Sustel look-up of the B-party numbers
+            return [{"b_party_number": "9886142073", "case_name": "OP KESTREL", "monitored": "Y"}]
         if "AS matched_last10" in sql:
             return [{"matched_last10": "9886142073", "case_name": "X", "monitored": "Y", "match_type": "b_party"}]
         if "AS imei, s.first_seen" in sql:
@@ -133,6 +137,7 @@ class FakeClient:
 def fake(monkeypatch):
     client = FakeClient()
     monkeypatch.setattr(service, "get_client", lambda source: client)
+    monkeypatch.setattr(service, "fetch_case_header", lambda case_id, msisdn: {})        # no Postgres in these tests
     return client
 
 
@@ -232,3 +237,134 @@ def test_limit_is_validated(client):
 
 def test_the_cdr_report_is_untouched(client):
     assert client.get("/api/v1/sections").status_code == 200
+
+
+# ────────────────────────────────────────────────────────
+# B Party Resolution: the SDR and Sustel match of each resolved number
+# ────────────────────────────────────────────────────────
+
+def _numbers(report):
+    return {r["b_party_number"]: r for r in report["b_party_resolution"]["numbers"]}
+
+
+def test_b_party_resolution_looks_the_numbers_up_in_sdr_and_sustel_on_the_dims_connection():
+    section = mapping.section("b_party_resolution")
+    assert [(b.key, b.source) for b in section.blocks] == [("numbers", "facts"), ("sdr", "dims"), ("sustel", "dims")]
+    sdr, sustel = (next(b for b in section.blocks if b.key == k).sql for k in ("sdr", "sustel"))
+    assert "FROM dim_sdr" in sdr and "`SUBSCRIBER_NAME`" in sdr and "{counterparts_last10:Array(String)}" in sdr
+    assert "FROM scout_reference.sustel AS r FINAL" in sustel and "`telno0`" in sustel and "{counterparts_last10:Array(String)}" in sustel   # either of the record's numbers
+
+
+def test_a_b_party_number_in_sdr_and_on_sustel_gets_its_name_and_the_sustel_match_on_its_own_row(fake):
+    report = service.run_ipdr_report(mapping, "919812345678", CASE, only=["b_party_resolution"])
+    row = _numbers(report)["919886142073"]
+    assert row["b_party_name"] == "Karthik Menon"
+    assert row["sustel_match"] is True and row["b_party_sustel_match"] is True
+    assert row["sustel"] == [{"case_name": "OP KESTREL", "monitored": "Y"}]
+    assert not {"statement", "sdr", "sdr_match"} & set(row)                        # only the name and the Sustel match are added
+    assert set(report["b_party_resolution"]) == {"numbers"}                          # the two look-up blocks are merged and dropped
+
+
+def test_a_number_with_no_sdr_and_no_sustel_record_has_no_name_and_no_match(fake):
+    row = _numbers(service.run_ipdr_report(mapping, "919812345678", CASE, only=["b_party_resolution"]))["919000000001"]
+    assert row["b_party_name"] is None and row["sustel_match"] is False and row["b_party_sustel_match"] is False and row["sustel"] is None
+
+
+def test_sustel_records_in_several_cases_are_all_listed(monkeypatch):
+    class TwoCases(FakeClient):
+        def query(self, sql, params):
+            if "arrayJoin([right(toString(`telno`)" in sql:
+                return [{"b_party_number": "9886142073", "case_name": "OP A", "monitored": "Y"},
+                        {"b_party_number": "9886142073", "case_name": "OP B", "monitored": "N"}]
+            return super().query(sql, params)
+    monkeypatch.setattr(service, "get_client", lambda source: TwoCases())
+    row = _numbers(service.run_ipdr_report(mapping, "919812345678", CASE, only=["b_party_resolution"]))["919886142073"]
+    assert row["sustel"] == [{"case_name": "OP A", "monitored": "Y"}, {"case_name": "OP B", "monitored": "N"}]
+
+
+def test_a_failing_sdr_look_up_leaves_the_name_empty_and_a_failing_sustel_look_up_leaves_its_match_unknown(monkeypatch):
+    from app.db import ClickHouseError
+
+    class Broken(FakeClient):
+        def query(self, sql, params):
+            if "AS subscriber_name" in sql:
+                raise ClickHouseError("dim_sdr missing")
+            if "arrayJoin([right(toString(`telno`)" in sql:
+                raise ClickHouseError("scout_reference.sustel missing")
+            return super().query(sql, params)
+    monkeypatch.setattr(service, "get_client", lambda source: Broken())
+    report = service.run_ipdr_report(mapping, "919812345678", CASE, only=["b_party_resolution"])
+    row = _numbers(report)["919886142073"]
+    assert row["b_party_name"] is None
+    assert row["sustel_match"] is None and row["b_party_sustel_match"] is None and row["sustel"] is None     # unknown, not false
+    assert [w["block"] for w in report["warnings"]] == ["sdr", "sustel"]
+
+
+def test_the_one_section_endpoint_returns_the_merged_rows(client):
+    body = client.get(f"/api/v1/ipdr/report/{CASE}/919812345678/section/b_party_resolution").json()
+    row = next(r for r in body["b_party_resolution"]["numbers"] if r["b_party_number"] == "919886142073")
+    assert row["b_party_name"] == "Karthik Menon" and row["b_party_sustel_match"] is True
+
+
+# ────────────────────────────────────────────────────────
+# Report header from Postgres (cases + telecom_metadata), for the CDR and the IPDR report
+# ────────────────────────────────────────────────────────
+
+CASE_HEADER = {
+    "ref": "FIR 112/11 Case Satwari", "ref_date": "2026-10-14T05:54:00Z", "input_gist": "IPDR demo", "analysed_by": "Insp R.Sharma",
+    "periods": {
+        "cdr": {"requested": {"from": "2026-06-01 00:00:00", "to": "2026-06-30 23:59:59"},
+                "actual": {"from": "2026-06-02 08:00:00", "to": "2026-06-29 20:00:00"}},
+        "ipdr": {"requested": {"from": "2026-07-01 00:00:00", "to": "2026-09-21 23:59:59"},
+                 "actual": {"from": "2026-07-01 21:29:00", "to": "2026-09-21 13:58:21"}},
+    },
+}
+
+
+@pytest.fixture
+def with_case(fake, monkeypatch):
+    monkeypatch.setattr(service, "fetch_case_header", lambda case_id, msisdn: CASE_HEADER)
+
+
+def test_the_ipdr_header_takes_the_case_fields_and_the_period_from_postgres(with_case):
+    header = service.run_ipdr_report(mapping, "919812345678", CASE, only=["header"])["header"]
+    assert (header["ref"], header["ref_date"], header["input_gist"], header["analysed_by"]) == (
+        "FIR 112/11 Case Satwari", "2026-10-14T05:54:00Z", "IPDR demo", "Insp R.Sharma")
+    assert header["ipdr_period"]["requested"] == {"from": "2026-07-01 00:00:00", "to": "2026-09-21 23:59:59"}
+    actual = header["ipdr_period"]["actual"]
+    assert actual["actual_from"] == "2026-07-01 21:29:00" and actual["actual_to"] == "2026-09-21 13:58:21"
+    assert actual["sessions"] == 202                                                      # the ClickHouse counts are kept
+    assert header["top_place"]["place"] == "Karachi"
+
+
+def test_a_query_parameter_wins_over_postgres_in_the_ipdr_header(with_case):
+    header = service.run_ipdr_report(mapping, "919812345678", CASE, only=["header"], header_extra={"ref": "OVERRIDE"})["header"]
+    assert header["ref"] == "OVERRIDE" and header["analysed_by"] == "Insp R.Sharma"
+
+
+def test_the_cdr_report_has_a_header_with_the_cdr_period(with_case):
+    report = service.run_report(load_mapping(MAPPING_FILE.with_name("report_mapping.py")), "919812345678", CASE)
+    assert list(report)[:4] == ["msisdn", "case_id", "generated_at", "header"]
+    header = report["header"]
+    assert header["ref"] == "FIR 112/11 Case Satwari" and header["analysed_on"] == report["generated_at"]
+    assert header["cdr_period"] == {"requested": {"from": "2026-06-01 00:00:00", "to": "2026-06-30 23:59:59"},
+                                    "actual": {"actual_from": "2026-06-02 08:00:00", "actual_to": "2026-06-29 20:00:00"}}
+
+
+def test_a_postgres_failure_leaves_the_header_empty_with_a_warning(fake, monkeypatch):
+    from app.pg import PostgresError
+
+    def down(case_id, msisdn):
+        raise PostgresError("connection refused")
+    monkeypatch.setattr(service, "fetch_case_header", down)
+    report = service.run_ipdr_report(mapping, "919812345678", CASE, only=["header"])
+    assert report["header"]["ref"] is None and report["header"]["ipdr_period"]["requested"] == {"from": None, "to": None}
+    assert report["warnings"] == [{"section": "header", "block": "postgres", "error": "connection refused"}]
+
+
+def test_the_full_report_endpoint_returns_the_cdr_and_the_ipdr_report(client, with_case):
+    body = client.get(f"/api/v1/full-report/{CASE}/919812345678").json()
+    assert set(body) == {"msisdn", "case_id", "generated_at", "cdr", "ipdr"}
+    assert body["cdr"]["header"]["ref"] == body["ipdr"]["header"]["ref"] == "FIR 112/11 Case Satwari"
+    assert "cdr_period" in body["cdr"]["header"] and "ipdr_period" in body["ipdr"]["header"]
+    assert "ai_insights" in body["cdr"] and "ai_insights" in body["ipdr"]

@@ -32,13 +32,17 @@ class TelecomReportMapping:
         Connection host/port/credentials come from env (see .env.example)."""
         return {
             "facts": "analytics",       # source: facts   -> CH_FACTS_*
-            # The LEA dim_* tables (dim_cri, dim_imei_legacy, dim_mnp, dim_msc,
-            # dim_profiler, dim_sdr, dim_sustel, dim_truecaller) live in `analytics`
+            # The LEA dim_* tables (dim_imei_legacy, dim_mnp, dim_profiler,
+            # dim_sdr, dim_truecaller) live in `analytics`
             # on :8123, laid out per the CREATE TABLE statements for `pi-scout-sit`.
             # Point this at another database/server if an offline deployment keeps
             # them split -- `source` per block still supports that.
             "dims": "analytics",        # source: dims    -> CH_DIMS_*
             "master": "master",         # source: facts (same server as facts by default)
+            "enriched": "scout_enriched",   # CAF: the real name is CH_ENRICHED_DATABASE (see __CAF__)
+            # Sustel, phone book, CRI (scout_reference): the real name is
+            # CH_REFERENCE_DATABASE; queries write __SUSTEL__ / __PHONEBOOK__ / __CRI__ (app/lea_reference.py).
+            "reference": "scout_reference",
         }
 
     @staticmethod
@@ -47,15 +51,18 @@ class TelecomReportMapping:
         return {
             "call_detail": "{facts}.fact_call_detail",
             "sdr": "{dims}.dim_sdr",
-            "cri": "{dims}.dim_cri",
+            "cri": "{reference}.cri",
             "imei": "{dims}.dim_imei_legacy",
             "mnp": "{dims}.dim_mnp",
-            "msc": "{dims}.dim_msc",
-            "phonebook": "{dims}.dim_phonebook",
+            # MSC code ranges (coai.com), loaded by the ingestion service's deployment_scripts/2026-10-21/ingest_msc_codes.py
+            "msc": "{master}.dim_msc_master",
+            "phonebook": "{reference}.phonebook",
             "profiler": "{dims}.dim_profiler",
-            "sustel": "{dims}.dim_sustel",
+            "sustel": "{reference}.sustel",
             "truecaller": "{dims}.dim_truecaller",
-            "caf": "{dims}.dim_caf",
+            # The operator CAF now lives in the enriched layer; queries write it as __CAF__ and app/mapping.py fills in
+            # CH_ENRICHED_DATABASE (default scout_enriched).
+            "caf": "{enriched}.customer_application_form",
             "tac": "master.Tac_DB_master",
             "cell_tower": "{facts}.dim_cell_tower",
             "sms_sender": "{master}.dim_sms_sender",
@@ -106,22 +113,25 @@ LIMIT 1
     def subscriber_photo() -> Dict[str, Any]:
         return {
             "description": (
-                "Subscriber photo from the CAF (customer acquisition form), "
-                "keyed on the target's mobile number: base64-encoded image "
-                "plus its MIME type, so a caller can render it as "
+                "Subscriber photo from dim_sdr (the SDR record), matched on the "
+                "target's number: base64-encoded image plus its MIME type, so a "
+                "caller can render it as "
                 "data:<photo_mime_type>;base64,<photo_base64>. Null when the "
-                "number has no CAF row or the row has no photo. Looked up "
-                "directly on the target number rather than through "
-                "sub_fact_mapping_a_party -- that table has no dim_caf_id "
-                "column, and the target is the a-party in its own report "
-                "anyway."
+                "number has no dim_sdr row or the row has no photo. It is "
+                "dim_sdr.photo1_base64 (compared on the last 10 digits of "
+                "SUBSCRIBER_NUMBER, which some sources store with the 91 prefix "
+                "and some without); dim_sdr carries no MIME type, so it is "
+                "image/jpeg. It used to be the CAF's photo (customer_application_form). "
+                "Looked up on the target number rather than through "
+                "sub_fact_mapping_a_party: the bridge is keyed by call_id, which "
+                "lives in the facts connection, and this block runs on the dims one."
             ),
             "clickhouse_query": """
-SELECT photo_base64, photo_mime_type
-FROM dim_caf
-WHERE toString(mobile_number) = {msisdn:String}
-  AND ifNull(photo_base64, '') != ''
-ORDER BY created_at DESC
+SELECT nullIf(photo1_base64, '') AS photo_base64,
+       'image/jpeg' AS photo_mime_type
+FROM dim_sdr
+WHERE right(toString(SUBSCRIBER_NUMBER), 10) = right({msisdn:String}, 10)
+  AND ifNull(photo1_base64, '') != ''
 LIMIT 1
             """
         }
@@ -138,13 +148,13 @@ SELECT 'Truecaller', `name`
 FROM dim_truecaller WHERE toString(`phone number`) = {msisdn:String} AND `name` != ''
 UNION ALL
 SELECT 'Phonebook', `User`
-FROM dim_phonebook WHERE toString(`Telephone`) = {msisdn:String} AND `User` != ''
+FROM __PHONEBOOK__ WHERE toString(`Telephone`) = {msisdn:String} AND `User` != ''
 UNION ALL
 SELECT 'Profiler', `names`
 FROM dim_profiler WHERE toString(`phone number`) = {msisdn:String} AND `names` != ''
 UNION ALL
 SELECT 'Sustel', `username`
-FROM dim_sustel WHERE toString(`telno`) = {msisdn:String} AND `username` != ''
+FROM __SUSTEL__ WHERE toString(`telno`) = {msisdn:String} AND `username` != ''
             """
         }
 
@@ -169,7 +179,7 @@ SELECT 'SDR' AS source, toString(`ALTERNATE_NUMBER`) AS number
 FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND toString(`ALTERNATE_NUMBER`) NOT IN ('', '0')
 UNION ALL
 SELECT 'Sustel', toString(`telno0`)
-FROM dim_sustel WHERE toString(`telno`) = {msisdn:String} AND toString(`telno0`) NOT IN ('', '0')
+FROM __SUSTEL__ WHERE toString(`telno`) = {msisdn:String} AND toString(`telno0`) NOT IN ('', '0')
             """
         }
 
@@ -215,7 +225,7 @@ SELECT
         toString(`telno`) IN {counterparts:Array(String)}, toString(`telno`),
         toString(`telno0`)
     )                       AS matched_number
-FROM dim_sustel
+FROM __SUSTEL__
 WHERE toString(`telno`) = {msisdn:String} OR toString(`telno0`) = {msisdn:String}
    OR toString(`telno`) IN {counterparts:Array(String)} OR toString(`telno0`) IN {counterparts:Array(String)}
             """
@@ -279,7 +289,7 @@ SELECT
         'target', 'b_party'
     )                AS match_type,
     `Officerconcerned` AS officer
-FROM dim_cri
+FROM __CRI__
 WHERE toString(`tTargetNo`) = {msisdn:String}
    OR toString(`tCallingNo`) = {msisdn:String}
    OR toString(`tCalledNo`) = {msisdn:String}
@@ -351,7 +361,7 @@ SELECT
     min(h.call_date)          AS first_seen,
     max(h.call_date)          AS last_seen
 FROM cell_hits AS h
-INNER JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
+INNER JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
 ORDER BY records DESC
@@ -520,7 +530,7 @@ SELECT
     any(t.latitude)  AS latitude,
     any(t.longitude) AS longitude
 FROM cell_hits AS h
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
 GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
             """
         }
@@ -559,7 +569,7 @@ SELECT
     any(t.latitude)  AS latitude,
     any(t.longitude) AS longitude
 FROM cell_hits AS h
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
 GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
             """
         }
@@ -601,7 +611,7 @@ SELECT
     any(t.latitude)           AS latitude,
     any(t.longitude)          AS longitude
 FROM cell_hits AS h
-INNER JOIN dim_cell_tower AS t ON t.cell_id = h.cell_id
+INNER JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
 ORDER BY records DESC LIMIT {limit:UInt32}
@@ -749,7 +759,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type NOT LIKE '%sms%'
 GROUP BY call_type, direction, counterpart, start_time, end_time,
@@ -777,7 +787,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type LIKE '%sms%'
 GROUP BY call_type, direction, counterpart, start_time, end_time,
@@ -812,7 +822,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type LIKE '%sms%'
   AND c.sms_sender_id = 0
@@ -842,7 +852,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN dim_cell_tower AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
 GROUP BY call_type, direction, counterpart, start_time, end_time,
          duration_seconds, cell_id
@@ -1078,7 +1088,7 @@ SELECT
     s.DateOf1stSanction AS first_sanction, s.validtill AS valid_till,
     s.Monitorby AS monitored_by, s.`Group` AS group_name,
     s.OfficerConcerned AS officer, s.remarks
-FROM dim_sustel AS s
+FROM __SUSTEL__ AS s
 WHERE toString(s.telno) = {msisdn:String} OR toString(s.telno0) = {msisdn:String}
    OR toString(s.telno) IN {counterparts:Array(String)} OR toString(s.telno0) IN {counterparts:Array(String)}
             """

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from app.config import settings
 from app.db import ClickHouseError, get_client
 from app.mapping import Block, Mapping, Section
+from app.pg import PostgresError, fetch_case_header
 
 
 def _lookup_home_circle(mapping: Mapping, msisdn: str) -> str:
@@ -93,6 +94,51 @@ def run_section(section: Section, params: Dict[str, Any],
     return {b.key: _run_block(b, params, errs, section.id) for b in section.blocks}
 
 
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _case_header(case_id: str, msisdn: str, errors: List[Dict[str, str]]) -> Dict[str, Any]:
+    """The case's header fields from Postgres. Best-effort like every other block: {} plus a warning when Postgres is
+    down, so the report still comes back with the header fields empty."""
+    try:
+        return fetch_case_header(case_id, msisdn)
+    except PostgresError as e:
+        errors.append({"section": "header", "block": "postgres", "error": str(e)})
+        return {}
+
+
+def _header_fields(kind: str, case: Dict[str, Any], extra: Optional[Dict[str, Any]], generated_at: str) -> Dict[str, Any]:
+    """Ref / Ref date / Input gist / Analysed by / Analysed on / `<kind>_period` requested and actual, `kind` being
+    'cdr' or 'ipdr'. Postgres supplies the values; a caller-supplied value (the query parameters of the IPDR endpoints)
+    wins over it."""
+    extra = extra or {}
+    period = (case.get("periods") or {}).get(kind) or {}
+    requested, actual = period.get("requested") or {}, period.get("actual") or {}
+    return {
+        "ref": extra.get("ref") or case.get("ref"),
+        "ref_date": extra.get("ref_date") or case.get("ref_date"),
+        "input_gist": extra.get("input_gist") or case.get("input_gist"),
+        "analysed_by": extra.get("analysed_by") or case.get("analysed_by"),
+        "analysed_on": generated_at,
+        f"{kind}_period": {
+            "requested": {"from": extra.get("period_requested_from") or requested.get("from"),
+                          "to": extra.get("period_requested_to") or requested.get("to")},
+            "actual": {"actual_from": actual.get("from"), "actual_to": actual.get("to")} if actual else None,
+        },
+    }
+
+
+def _cdr_header(result: Dict[str, Any], case: Dict[str, Any]) -> None:
+    """The CDR report's header, put right after `generated_at` (the CDR mapping has no header section)."""
+    header = _header_fields("cdr", case, None, result["generated_at"])
+    ordered = {k: v for k, v in result.items() if k in ("msisdn", "case_id", "generated_at")}
+    ordered["header"] = header
+    ordered.update({k: v for k, v in result.items() if k not in ordered})
+    result.clear()
+    result.update(ordered)
+
+
 def run_report(mapping: Mapping, msisdn: str, case_id: str,
                limit: Optional[int] = None,
                only: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -106,6 +152,8 @@ def run_report(mapping: Mapping, msisdn: str, case_id: str,
     }
     for s in sections:
         result[s.id] = run_section(s, params, errors)
+    if not only:
+        _cdr_header(result, _case_header(case_id, msisdn, errors))
     if errors:
         result["warnings"] = errors
     return result
@@ -126,6 +174,8 @@ def run_panel(mapping: Mapping, msisdn: str, case_id: str, panel: str,
     }
     for s in sections:
         result[s.id] = run_section(s, params, errors)
+    if panel == "right":
+        _cdr_header(result, _case_header(case_id, msisdn, errors))
     if errors:
         result["warnings"] = errors
     return result
@@ -178,25 +228,43 @@ def build_ipdr_params(mapping: Mapping, msisdn: str, case_id: str, limit: Option
     return params
 
 
-def _ipdr_header(result: Dict[str, Any], extra: Optional[Dict[str, Any]]) -> None:
+def _ipdr_header(result: Dict[str, Any], case: Dict[str, Any], extra: Optional[Dict[str, Any]]) -> None:
     """Shape the header the way the report lays it out: Ref / Ref date / Input gist / Analysed by / Analysed on /
-    IPDR period requested and actual / Top place. Ref, date, gist, analyst and the requested period are not in
-    ClickHouse: the caller supplies them (null when it does not)."""
-    extra = extra or {}
+    IPDR period requested and actual / Top place. The case fields and the period come from Postgres (a value the caller
+    passes as a query parameter wins); the top place and the session counts of the actual period are from ClickHouse."""
     block = result.get("header") or {}
-    actual = block.get("ipdr_period")
-    result["header"] = {
-        "top_place": block.get("top_place"),
-        "ref": extra.get("ref"),
-        "ref_date": extra.get("ref_date"),
-        "input_gist": extra.get("input_gist"),
-        "analysed_by": extra.get("analysed_by"),
-        "analysed_on": result.get("generated_at"),
-        "ipdr_period": {
-            "requested": {"from": extra.get("period_requested_from"), "to": extra.get("period_requested_to")},
-            "actual": actual,
-        },
-    }
+    header = _header_fields("ipdr", case, extra, result["generated_at"])
+    period = header["ipdr_period"]
+    measured = block.get("ipdr_period") or {}                         # ClickHouse: the sessions actually present
+    if measured:
+        period["actual"] = {**measured, **{k: v for k, v in (period["actual"] or {}).items() if v}}
+    header["top_place"] = block.get("top_place")
+    result["header"] = header
+
+
+# ─────────────────────────────────────────────────────────
+# B Party Resolution: each resolved number with its SDR name and Sustel match
+# ─────────────────────────────────────────────────────────
+
+def _enrich_b_party_resolution(section: Dict[str, Any]) -> None:
+    """Merge the `sdr` and `sustel` look-ups (dims) into the `numbers` rows (facts) by the number's last 10 digits, in Python: the two
+    connections may be different servers, so they cannot be joined in SQL. Each row gains `b_party_name` (the SDR subscriber name, null when
+    there is no SDR record), `sustel_match` / `b_party_sustel_match` (true / false) and `sustel` (the case and whether it is monitored, null when
+    there is none); the two helper blocks are removed. A Sustel look-up that failed leaves the match null (unknown), never false."""
+    sdr, sustel = section.pop("sdr", None), section.pop("sustel", None)
+    rows = section.get("numbers")
+    if not isinstance(rows, list):
+        return
+    name_by = {str(r.get("b_party_number")): r.get("subscriber_name") for r in (sdr or [])}
+    sustel_by: Dict[str, List[Dict[str, Any]]] = {}
+    for r in sustel or []:
+        sustel_by.setdefault(str(r.get("b_party_number")), []).append({"case_name": r.get("case_name"), "monitored": r.get("monitored")})
+    for row in rows:
+        last10 = str(row.get("b_party_number") or "")[-10:]
+        row["b_party_name"] = name_by.get(last10) or None
+        row["sustel_match"] = None if sustel is None else last10 in sustel_by
+        row["b_party_sustel_match"] = row["sustel_match"]
+        row["sustel"] = sustel_by.get(last10) or None
 
 
 def run_ipdr_report(mapping: Mapping, msisdn: str, case_id: str, limit: Optional[int] = None,
@@ -214,8 +282,23 @@ def run_ipdr_report(mapping: Mapping, msisdn: str, case_id: str, limit: Optional
     }
     for s in sections:
         result[s.id] = run_section(s, params, errors)
+    if isinstance(result.get("b_party_resolution"), dict):
+        _enrich_b_party_resolution(result["b_party_resolution"])
     if "header" in result:
-        _ipdr_header(result, header_extra)
+        _ipdr_header(result, _case_header(case_id, msisdn, errors), header_extra)
     if errors:
         result["warnings"] = errors
     return result
+
+
+def run_combined_report(cdr_mapping: Mapping, ipdr_mapping: Mapping, msisdn: str, case_id: str,
+                        limit: Optional[int] = None) -> Dict[str, Any]:
+    """The CDR report and the IPDR report of one number in one response: {msisdn, case_id, generated_at, cdr, ipdr}.
+    Each part is exactly what its own endpoint returns, header included."""
+    return {
+        "msisdn": msisdn,
+        "case_id": case_id,
+        "generated_at": _now(),
+        "cdr": run_report(cdr_mapping, msisdn, case_id, limit),
+        "ipdr": run_ipdr_report(ipdr_mapping, msisdn, case_id, limit),
+    }

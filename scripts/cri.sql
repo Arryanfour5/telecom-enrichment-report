@@ -14,7 +14,15 @@ SELECT
     min(cd.call_date)                                   AS first_seen,
     max(cd.call_date)                                   AS last_seen
 FROM fact_call_detail cd
-INNER JOIN dim_cri c
+-- CRI is scout_reference.cri (the Access ingestion's table), not analytics.dim_cri; the columns read here under their legacy names.
+INNER JOIN (
+    SELECT cdr_id AS tCDRID, cri_id AS tCRIID,
+           toInt64OrNull(nullIf(replaceRegexpAll(target_no, '[^0-9]', ''), ''))  AS tTargetNo,
+           toInt64OrNull(nullIf(replaceRegexpAll(calling_no, '[^0-9]', ''), '')) AS tCallingNo,
+           toInt64OrNull(nullIf(replaceRegexpAll(called_no, '[^0-9]', ''), ''))  AS tCalledNo,
+           toDateTime(call_date) AS tDate, call_type AS tCallType, call_direction AS tCallDirection, '' AS Officerconcerned
+    FROM scout_reference.cri FINAL WHERE `_is_deleted` = 0
+) c
     ON toString(if(cd.caller = cd.target_number, cd.receiver, cd.caller))
        IN (toString(c.tCallingNo), toString(c.tCalledNo))
 WHERE cd.case_id = {case_id:UUID} AND cd.target_number = {msisdn:String}
