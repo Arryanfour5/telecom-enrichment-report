@@ -43,7 +43,7 @@ def sustel_sql(ref: Optional[str] = None) -> str:
         "r.ectel AS ECTEL, toInt64OrNull(r.proposal_no) AS `Propsal no`, toDateTime(r.ltr_dt) AS LTR_DT, r.da AS DA, r.re AS RE, "
         "r.remarks AS remarks, toDateTime(r.dt419) AS Dt419, toDateTime(r.dt_proposal) AS DtProposal, toString(r.dt_delete) AS DtDelete, "
         "r.officer_concerned AS OfficerConcerned, toDateTime(r.date_of_2nd_sanction) AS DateOf2ndSanction "
-        f"FROM {_ref(ref)}.sustel AS r FINAL WHERE r._is_deleted = 0)"
+        f"FROM `{_ref(ref)}`.sustel AS r FINAL WHERE r._is_deleted = 0)"
     )
 
 
@@ -52,7 +52,7 @@ def phonebook_sql(ref: Optional[str] = None) -> str:
         "(SELECT r.phonebook_id AS id, toInt64OrZero(replaceRegexpAll(r.telephone, '[^0-9]', '')) AS Telephone, "
         "r.user_name AS `User`, r.place AS Place, r.district AS District, r.state AS State, r.country AS Country, r.remarks AS Remarks, "
         "r.reference AS Reference, toDate(r.ref_date) AS `Date`, toDateTime(r.entry_date) AS `Date of entry` "
-        f"FROM {_ref(ref)}.phonebook AS r FINAL WHERE r._is_deleted = 0)"
+        f"FROM `{_ref(ref)}`.phonebook AS r FINAL WHERE r._is_deleted = 0)"
     )
 
 
@@ -64,5 +64,5 @@ def cri_sql(ref: Optional[str] = None) -> str:
         + _num("right10_calling_no") + " AS tRight10CallingNo, " + _num("right10_called_no") + " AS tRight10CalledNo, "
         + _num("right10_other_no") + " AS tRight10OtherNo, " + _num("other_no") + " AS tOtherNo, '' AS Officerconcerned, "
         "parseDateTimeBestEffortOrNull(r.entered_on) AS EnterON "
-        f"FROM {_ref(ref)}.cri AS r FINAL WHERE r._is_deleted = 0)"
+        f"FROM `{_ref(ref)}`.cri AS r FINAL WHERE r._is_deleted = 0)"
     )

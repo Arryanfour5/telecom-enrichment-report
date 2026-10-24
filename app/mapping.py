@@ -44,17 +44,17 @@ def caf_table() -> str:
     """The operator CAF, fully qualified: <CH_ENRICHED_DATABASE>.customer_application_form."""
     from app.config import settings
     database = settings.ch_enriched_database
-    if not re.fullmatch(r"[A-Za-z0-9_]+", database or ""):
-        raise MappingError(f"CH_ENRICHED_DATABASE {database!r} is not a plain database name")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", database or ""):
+        raise MappingError(f"CH_ENRICHED_DATABASE {database!r} is not a valid database name (letters, digits, _ and -)")
     return f"`{database}`.customer_application_form"
 
 
 def reference_database() -> str:
-    """CH_REFERENCE_DATABASE, checked to be a plain name (it is written into the Sustel / phone book / CRI subqueries)."""
+    """CH_REFERENCE_DATABASE, checked to be a valid name (letters, digits, _ and -; it is back-quoted into the Sustel / phone book / CRI subqueries)."""
     from app.config import settings
     database = settings.ch_reference_database
-    if not re.fullmatch(r"[A-Za-z0-9_]+", database or ""):
-        raise MappingError(f"CH_REFERENCE_DATABASE {database!r} is not a plain database name")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", database or ""):
+        raise MappingError(f"CH_REFERENCE_DATABASE {database!r} is not a valid database name (letters, digits, _ and -)")
     return database
 
 

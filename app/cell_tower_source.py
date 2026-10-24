@@ -40,8 +40,8 @@ assert "master" not in _SQL and "{" not in _SQL and "__" not in _SQL
 
 
 def _ident(name: str) -> str:
-    if not re.fullmatch(r"[A-Za-z0-9_]+", name or ""):
-        raise ValueError(f"{name!r} is not a plain database name")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", name or ""):
+        raise ValueError(f"{name!r} is not a valid database name (letters, digits, _ and -)")
     return '"' + name + '"'
 
 

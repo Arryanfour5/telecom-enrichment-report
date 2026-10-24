@@ -120,15 +120,24 @@ LIMIT 1
                 "number has no dim_sdr row or the row has no photo. It is "
                 "dim_sdr.photo1_base64 (compared on the last 10 digits of "
                 "SUBSCRIBER_NUMBER, which some sources store with the 91 prefix "
-                "and some without); dim_sdr carries no MIME type, so it is "
-                "image/jpeg. It used to be the CAF's photo (customer_application_form). "
+                "and some without). dim_sdr carries no MIME type: it is read from "
+                "the first bytes of the base64 (PNG iVBOR, JPEG /9j/, GIF R0lGOD, "
+                "WEBP UklGR; image/jpeg otherwise; a stored prefix never decides it, "
+                "even a wrong one), and a stored "
+                "\"data:image/..;base64,\" prefix is stripped, so photo_base64 is "
+                "always plain base64. It used to be the CAF's photo (customer_application_form). "
                 "Looked up on the target number rather than through "
                 "sub_fact_mapping_a_party: the bridge is keyed by call_id, which "
                 "lives in the facts connection, and this block runs on the dims one."
             ),
             "clickhouse_query": """
-SELECT nullIf(photo1_base64, '') AS photo_base64,
-       'image/jpeg' AS photo_mime_type
+SELECT nullIf(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), '') AS photo_base64,
+       multiIf(startsWith(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), 'iVBOR'),  'image/png',
+               startsWith(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), '/9j/'),   'image/jpeg',
+               startsWith(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), 'R0lGOD'), 'image/gif',
+               startsWith(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), 'UklGR'),  'image/webp',
+               match(photo1_base64, '^data:image/[A-Za-z0-9.+-]+[;,]'), extract(photo1_base64, '^data:([^;,]+)'),
+               'image/jpeg') AS photo_mime_type
 FROM dim_sdr
 WHERE right(toString(SUBSCRIBER_NUMBER), 10) = right({msisdn:String}, 10)
   AND ifNull(photo1_base64, '') != ''
