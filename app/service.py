@@ -45,6 +45,12 @@ def _lookup_counterparts(mapping: Mapping, msisdn: str, case_id: str) -> List[st
     return [r["counterpart"] for r in rows if r.get("counterpart")]
 
 
+def _locations_limit(cfg: Dict[str, Any], limit: Optional[int]) -> int:
+    """Rows in the day / night location lists: `locations_top_n` (5), or fewer when the caller asks for a smaller `limit`."""
+    top = cfg.get("locations_top_n", 5)
+    return min(top, limit) if limit else top
+
+
 def build_params(mapping: Mapping, msisdn: str, case_id: str,
                  limit: Optional[int] = None) -> Dict[str, Any]:
     """Bind params offered to every query, whether or not it uses them."""
@@ -54,6 +60,7 @@ def build_params(mapping: Mapping, msisdn: str, case_id: str,
         "case_id": case_id,
         "limit": limit or cfg.get("top_n", settings.default_limit),
         "b_party_locations_limit": cfg.get("b_party_locations_limit", 2),
+        "locations_limit": _locations_limit(cfg, limit),
         "day_start": cfg.get("day_window_start", 6),
         "day_end": cfg.get("day_window_end", 20),
         "home_country": cfg.get("home_country_code", "91"),
@@ -83,7 +90,38 @@ def _run_block(block: Block, params: Dict[str, Any], errors: List[Dict[str, str]
         return rows[0] if rows else None
     if block.kind == "value":
         return list(rows[0].values())[0] if rows else None
-    return rows
+    return _dedupe(section_id, block.key, rows)
+
+
+# Blocks that can list the same fact more than once: the SDR holds several records of a number, so a source can return the
+# same name or number twice. Only these are de-duplicated; a list of sessions or calls may legitimately hold two identical rows.
+#   per source: the same value twice from ONE source (Profiler, Phonebook, Truecaller, SDR, Sustel) is shown once, the first
+#               row kept; the same value from different sources stays, one row per source
+#   whole row:  only a row identical in every column is dropped
+_DEDUPE_PER_SOURCE = {("name_alias", "names"): "value", ("alternate_numbers", "numbers"): "number"}
+_DEDUPE_WHOLE_ROW = {("imei", "imei_dim_hits"), ("ai_insights", "sustel_match"), ("ai_insights", "profiler_match"),
+                      ("ai_insights", "sustel_hits"), ("sustel", "matches")}
+
+
+def _norm(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _dedupe(section_id: str, block_key: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """`rows` without the repeats described above, in their original order; any other block is returned as it is."""
+    column = _DEDUPE_PER_SOURCE.get((section_id, block_key))
+    if column is None and (section_id, block_key) not in _DEDUPE_WHOLE_ROW:
+        return rows
+    seen, kept = set(), []
+    for row in rows:
+        if column and row.get(column) not in (None, ""):
+            key = (_norm(row.get("source")), _norm(row[column]))
+        else:
+            key = repr(sorted(row.items(), key=str))
+        if key not in seen:
+            seen.add(key)
+            kept.append(row)
+    return kept
 
 
 def run_section(section: Section, params: Dict[str, Any],
@@ -210,6 +248,7 @@ def build_ipdr_params(mapping: Mapping, msisdn: str, case_id: str, limit: Option
         "case_id": case_id,
         "limit": limit or cfg.get("top_n", settings.default_limit),
         "events_limit": cfg.get("events_limit", 25),
+        "locations_limit": _locations_limit(cfg, limit),
         "day_start": cfg.get("day_window_start", 6),
         "day_end": cfg.get("day_window_end", 20),
         "home_country_name": cfg.get("home_country_name", "India"),

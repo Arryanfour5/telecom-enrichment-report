@@ -54,12 +54,20 @@ _LAST = "toString(maxIf(f.start_date_time, " + _VALID + "))"
 _MB = "round(sum(ifNull(f.uplink_vol, 0) + ifNull(f.downlink_vol, 0)) / 1048576, 2)"
 _IMEI = "replaceAll(replaceAll(ifNull(f.imei, ''), '`', ''), char(39), '')"
 
+# The TAC rows (handset brand / model) of THIS number's IMEIs only: the table is read through its primary key (tac_code) instead of
+# being joined whole for a handful of handsets.
+_TAC = """(
+    SELECT * FROM master.Tac_DB_master
+    WHERE is_current = 1
+      AND tac_code IN (SELECT toUInt32OrZero(substring(""" + _IMEI + """, 1, 8)) FROM fact_internet_sessions AS f
+                       WHERE """ + _OF_NUMBER + """ AND ifNull(f.imei, '') != '')
+)"""
+
 # The serving-cell dimension for THIS number's cells only (dim_cell_tower is ~500k rows).
 _CELLS = """(
     SELECT cell_id, any(ifNull(city, '')) AS city, any(ifNull(state, '')) AS state, any(country) AS country,
            nullIf(any(latitude), 0) AS latitude, nullIf(any(longitude), 0) AS longitude
-    FROM __CELL_TOWER__
-    WHERE cell_id IN (SELECT cell_id FROM fact_internet_sessions AS f WHERE """ + _OF_NUMBER + """)
+    FROM __CELL_TOWER_OF__(SELECT cell_id FROM fact_internet_sessions AS f WHERE """ + _OF_NUMBER + """)
     GROUP BY cell_id
 )"""
 
@@ -103,6 +111,7 @@ class IPDRReportMapping:
             "day_window_start": 6,             # 06:00 - 20:00 counts as "day"
             "day_window_end": 20,
             "top_n": 10,
+            "locations_top_n": 5,              # cities in the day / night location lists
             "events_limit": 25,                # individual sessions listed under VPN / TOR / BitTorrent / VoIP
             "home_country_name": "India",      # as dim_cell_tower.country spells it
             # File-wise internet usage (AI Insights, point 1): megabytes per ACTIVE day of the file. PROVISIONAL:
@@ -329,25 +338,38 @@ WHERE """ + _OF_NUMBER + """
 
     @staticmethod
     def _locations(period_filter: str) -> str:
+        """Top places city-wise: the sessions are counted per serving cell first, then the cells of one city are added up. The
+        columns are the same as ever; `cell_id` and the coordinates are those of the city's busiest cell. A cell the tower master has
+        no city for stays its own place. Capped at `locations_top_n` (5)."""
         return """
 SELECT
-    f.cell_id AS cell_id, any(t.city) AS city, any(t.state) AS state, any(t.country) AS country,
-    any(t.latitude) AS latitude, any(t.longitude) AS longitude,
-    count()                                          AS sessions,
-    """ + _FIRST + """                               AS first_seen,
-    """ + _LAST + """                                AS last_seen
-FROM fact_internet_sessions AS f
-LEFT JOIN """ + _CELLS + """ AS t ON t.cell_id = f.cell_id
-WHERE """ + _OF_NUMBER + " AND " + _VALID + " AND " + period_filter + """
-GROUP BY f.cell_id
+    argMax(c.cell_id, c.cell_sessions) AS cell_id, any(c.city) AS city, any(c.state) AS state, any(c.country) AS country,
+    argMax(c.latitude, c.cell_sessions) AS latitude, argMax(c.longitude, c.cell_sessions) AS longitude,
+    sum(c.cell_sessions)                             AS sessions,
+    min(c.first_at)                                  AS first_seen,
+    max(c.last_at)                                   AS last_seen
+FROM (
+    SELECT
+        f.cell_id AS cell_id, any(t.city) AS city, any(t.state) AS state, any(t.country) AS country,
+        any(t.latitude) AS latitude, any(t.longitude) AS longitude,
+        if(any(t.city) != '', any(t.city), concat('cell ', f.cell_id)) AS place,
+        count()                                      AS cell_sessions,
+        """ + _FIRST + """                           AS first_at,
+        """ + _LAST + """                            AS last_at
+    FROM fact_internet_sessions AS f
+    LEFT JOIN """ + _CELLS + """ AS t ON t.cell_id = f.cell_id
+    WHERE """ + _OF_NUMBER + " AND " + _VALID + " AND " + period_filter + """
+    GROUP BY f.cell_id
+) AS c
+GROUP BY c.place, c.state, c.country
 ORDER BY sessions DESC
-LIMIT {limit:UInt32}
+LIMIT {locations_limit:UInt32}
         """
 
     @staticmethod
     def locations_day() -> Dict[str, Any]:
         return {
-            "description": "Top DAY locations (serving cells inside the day window) with latitude / longitude and the date range.",
+            "description": "Top DAY locations, city-wise (serving cells inside the day window, added up per city; top `locations_top_n`) with latitude / longitude and the date range.",
             "clickhouse_query": IPDRReportMapping._locations(
                 "toHour(f.start_date_time) >= {day_start:UInt8} AND toHour(f.start_date_time) < {day_end:UInt8}"),
         }
@@ -355,7 +377,7 @@ LIMIT {limit:UInt32}
     @staticmethod
     def locations_night() -> Dict[str, Any]:
         return {
-            "description": "Top NIGHT locations (serving cells outside the day window) with latitude / longitude and the date range.",
+            "description": "Top NIGHT locations, city-wise (serving cells outside the day window, added up per city; top `locations_top_n`) with latitude / longitude and the date range.",
             "clickhouse_query": IPDRReportMapping._locations(
                 "(toHour(f.start_date_time) < {day_start:UInt8} OR toHour(f.start_date_time) >= {day_end:UInt8})"),
         }
@@ -415,7 +437,7 @@ FROM (
     )
     GROUP BY stretch, dev
 ) AS s
-LEFT JOIN master.Tac_DB_master AS d ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8)) AND d.is_current = 1
+LEFT JOIN """ + _TAC + """ AS d ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8))
 GROUP BY s.imei, s.first_seen, s.last_seen, s.sessions
 ORDER BY s.first_seen
             """
@@ -463,7 +485,7 @@ FROM (
     )
     GROUP BY stretch, sim
 ) AS s
-LEFT JOIN master.Tac_DB_master AS d ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8)) AND d.is_current = 1
+LEFT JOIN """ + _TAC + """ AS d ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8))
 GROUP BY s.imsi, s.first_seen, s.last_seen, s.sessions, s.imei
 ORDER BY s.first_seen
             """
@@ -654,7 +676,9 @@ SELECT indicator, sessions, distinct_source_ips, first_seen, last_seen, access_p
       AND f.record_id IN (
           SELECT record_id FROM fact_ipdr_anomaly
           WHERE anomaly_id IN (SELECT anomaly_id FROM dim_anomaly
-                               WHERE anomaly_domain = 'ipdr' AND anomaly_type = 'multiple_concurrent_device_connections'))
+                               WHERE anomaly_domain = 'ipdr' AND anomaly_type = 'multiple_concurrent_device_connections')
+            AND record_id IN (SELECT g.record_id FROM fact_internet_sessions AS g
+                              WHERE g.case_id = {case_id:UUID} AND right(g.device_id, 10) = right({msisdn:String}, 10)))
     HAVING sessions > 0
     UNION ALL
     SELECT 'tethering_access_point' AS indicator, count() AS sessions, uniqExact(f.source_ip) AS distinct_source_ips,

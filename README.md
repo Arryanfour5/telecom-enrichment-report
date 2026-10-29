@@ -204,6 +204,13 @@ facts and dims may be on different servers, so they are never joined in SQL.
 - *Websites used*: IPDR has no URLs, so a site is recognised by the destination IP's AS domain (exact match against
   `ecommerce_domains` / `financial_domains`). Cloud and CDN domains (AWS, CloudFront, Akamai, Google ...) cannot be told
   apart from the shops hosted on them, so they are listed apart in `shared_hosting` and never counted as e-commerce.
+- *Repeated rows* (CDR and IPDR): `name_alias.names` and `alternate_numbers.numbers` show a value once **per source** -- when one source (e.g. the SDR, which can hold
+  several records of a number) returns the same name or number twice, the first row is kept; the Profiler, Phonebook, Truecaller, SDR and Sustel each still show their
+  own row. `imei.imei_dim_hits`, `ai_insights.sustel_match` / `profiler_match` / `sustel_hits` and `sustel.matches` drop only rows identical in every column.
+  Done in `_dedupe` (`app/service.py`); other lists are untouched.
+- *Day / night locations* (`locations.day`, `locations.night`, CDR and IPDR): city-wise -- the cells of one city are added up, a cell with no city stays its
+  own place -- and capped at the top `locations_top_n` (5, in the mapping's settings; a smaller `limit` query parameter lowers it). The columns are unchanged;
+  `cell_id`, address and coordinates are those of the city's busiest cell.
 - *International roaming / cities / locations*: the serving cell id resolved through `dim_cell_tower` (country, city,
   latitude, longitude); "international" is any country other than `home_country_name`.
 - *VoIP calls* (`connectivity.voip_by_country`, `connectivity.voip_calls`): sessions with `fact_internet_sessions.voip_call_type` set (`whatsapp_call`, `telegram_call`, `instagram_call`, ...), inferred by the ingestion's AppInferenceEngine. Needs a database that has ingested an IPDR file since the column shipped.

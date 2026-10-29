@@ -64,7 +64,7 @@ def resolve_tokens(sql: Optional[str]) -> Optional[str]:
     __CELL_TOWER__ -> analytics.dim_cell_tower with every column converted to one type (app/cell_tower_source.py)."""
     if not sql or "__" not in sql:
         return sql
-    if "__CELL_TOWER__" in sql:
+    if "__CELL_TOWER" in sql:
         from app import cell_tower_source
         sql = cell_tower_source.expand(sql)
     if "__CAF__" in sql:

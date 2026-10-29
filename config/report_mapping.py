@@ -19,6 +19,35 @@ may live on entirely separate ClickHouse servers.
 from typing import Any, Dict, List
 
 
+def _msisdn_norm(expr: str) -> str:
+    """The country-aware key of a phone number (a String SQL expression): the digits, `00` dropped, an Indian 10-digit or
+    0 + 10 number as 91 + 10. The same text as scoutfeed-sdis-v2 app/interfaces/msisdn_norm.py and ipdr-analytics-v2
+    msisdn_norm.py: dim_truecaller (~2 crore rows) is sorted on it, so a lookup written with it reads only that number."""
+    d = f"replaceRegexpAll({expr}, '[^0-9]', '')"
+    d = f"if(startsWith({d}, '00'), substring({d}, 3), {d})"
+    return (f"multiIf(length({d}) = 10, concat('91', {d}), "
+            f"length({d}) = 11 AND startsWith({d}, '0'), concat('91', substring({d}, 2)), {d})")
+
+
+# master.dim_sms_sender.sub_category = WHO sends (categorization = the DLT type: Service / Promotional / Transactional / Government). It holds two
+# vocabularies side by side: the ipdr-analytics-v2 keyword taxonomy (Banking, E-commerce, ...; sms_sender_taxonomy.py) and the TRAI header
+# list's sectors (Banking & Finance, ...; scoutfeed-sdis-v2 deployment_scripts/2026-10-26/ingest_sms_headers_csv.py), and a new name can appear
+# at any time. So the SMS blocks below do not list exact names: a sender is financial / e-commerce when its sub_category CONTAINS one of these
+# words (any case). A new sub_category such as "Digital Payments" or "Online Shopping" is picked up with no change; add a word here to widen it.
+# Words are chosen not to catch the other sectors ("food" alone would catch "Agriculture & Food", so it is "food delivery").
+_FINANCIAL_KEYWORDS = ("bank", "financ", "fintech", "payment", "lending", "credit", "loan", "insur")
+_ECOMMERCE_KEYWORDS = ("commerce", "retail", "shopping", "marketplace", "food delivery", "consumer")
+
+
+def _sql_any_word(column: str, words) -> str:
+    """True when `column` contains any of `words`, ignoring case (words are fixed constants above, never user input)."""
+    return "multiSearchAnyCaseInsensitive(" + column + ", [" + ", ".join("'" + w.replace("'", "''") + "'" for w in words) + "])"
+
+
+_TRUECALLER_KEY = _msisdn_norm("ifNull(toString(`phone number`), '')")      # dim_truecaller's ORDER BY
+_MSISDN_PROBE = f"nullIf({_msisdn_norm('{msisdn:String}')}, '')"            # the asked number; no digits = NULL, matches nothing
+
+
 class TelecomReportMapping:
     """Repository for the telecom enrichment report's schema mapping and queries."""
 
@@ -82,6 +111,7 @@ class TelecomReportMapping:
             "day_window_end": 20,
             "top_n": 10,
             "b_party_locations_limit": 2,   # rows in each of the most/least contacted B-party location lists
+            "locations_top_n": 5,           # cities in the day / night location lists
             "home_country_code": "91",
         }
 
@@ -101,9 +131,11 @@ SELECT
     s.`SERVICE_PROVIDER`  AS operator,
     s.`CIRCLE`            AS circle,
     s.`CON_TYPE`          AS connection_type,
-    t.`name`              AS truecaller_name
+    -- only the target's Truecaller rows (dim_truecaller is ~2 crore), read on its sort key;
+    -- several rows for the number: the latest loaded (highest id)
+    (SELECT argMax(`name`, id) FROM dim_truecaller
+     WHERE """ + _TRUECALLER_KEY + """ = """ + _MSISDN_PROBE + """) AS truecaller_name
 FROM dim_sdr AS s
-LEFT JOIN dim_truecaller AS t ON toString(t.`phone number`) = toString(s.`SUBSCRIBER_NUMBER`)
 WHERE toString(s.`SUBSCRIBER_NUMBER`) = {msisdn:String}
 LIMIT 1
             """
@@ -154,7 +186,7 @@ SELECT 'SDR' AS source, `SUBSCRIBER_NAME` AS value
 FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND `SUBSCRIBER_NAME` != ''
 UNION ALL
 SELECT 'Truecaller', `name`
-FROM dim_truecaller WHERE toString(`phone number`) = {msisdn:String} AND `name` != ''
+FROM dim_truecaller WHERE """ + _TRUECALLER_KEY + """ = """ + _MSISDN_PROBE + """ AND `name` != ''
 UNION ALL
 SELECT 'Phonebook', `User`
 FROM __PHONEBOOK__ WHERE toString(`Telephone`) = {msisdn:String} AND `User` != ''
@@ -327,6 +359,7 @@ FROM fact_call_anomaly AS fca
 INNER JOIN dim_anomaly AS da ON da.anomaly_id = fca.anomaly_id
 INNER JOIN fact_call_detail AS c ON c.call_id = fca.call_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
+  AND fca.call_id IN (SELECT call_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String})
   AND (da.name ILIKE '%forward%' OR da.category ILIKE '%forward%' OR da.anomaly_type ILIKE '%forward%')
             """
         }
@@ -370,7 +403,7 @@ SELECT
     min(h.call_date)          AS first_seen,
     max(h.call_date)          AS last_seen
 FROM cell_hits AS h
-INNER JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
+INNER JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
 ORDER BY records DESC
@@ -484,6 +517,7 @@ flagged_days AS (
     INNER JOIN dim_anomaly AS da ON da.anomaly_id = fca.anomaly_id
     INNER JOIN fact_call_detail AS c ON c.call_id = fca.call_id
     WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
+      AND fca.call_id IN (SELECT call_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String})
       AND (da.name ILIKE '%silence%' OR da.category ILIKE '%silence%' OR da.anomaly_type ILIKE '%silence%')
 )
 SELECT
@@ -509,9 +543,10 @@ LIMIT {limit:UInt32}
     def locations_day() -> Dict[str, Any]:
         return {
             "description": (
-                "Top cell towers hit during day-window hours -- both start_cell_id "
-                "and end_cell_id, so a call that moved between cells counts both -- "
-                "with full tower detail from dim_cell_tower."
+                "Top cities by the cell towers hit during day-window hours -- both "
+                "start_cell_id and end_cell_id, so a call that moved between cells counts "
+                "both -- the towers of one city added up (cell_id, address and coordinates "
+                "are those of the city's busiest tower), top `locations_top_n`."
             ),
             "clickhouse_query": """
 WITH cell_hits AS (
@@ -530,17 +565,31 @@ WITH cell_hits AS (
       AND toHour(c.start_date_time) <  {day_end:UInt8}
 )
 SELECT
-    h.cell_id        AS cell_id,
-    count()          AS records,
-    any(t.address)   AS address,
-    any(t.city)      AS city,
-    any(t.state)     AS state,
-    any(t.country)   AS country,
-    any(t.latitude)  AS latitude,
-    any(t.longitude) AS longitude
-FROM cell_hits AS h
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
-GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
+    argMax(c.cell_id, c.cell_records)   AS cell_id,
+    sum(c.cell_records)                 AS records,
+    argMax(c.address, c.cell_records)   AS address,
+    any(c.city)                         AS city,
+    any(c.state)                        AS state,
+    any(c.country)                      AS country,
+    argMax(c.latitude, c.cell_records)  AS latitude,
+    argMax(c.longitude, c.cell_records) AS longitude
+FROM (
+    SELECT
+        h.cell_id        AS cell_id,
+        count()          AS cell_records,
+        any(t.address)   AS address,
+        any(t.city)      AS city,
+        any(t.state)     AS state,
+        any(t.country)   AS country,
+        any(t.latitude)  AS latitude,
+        any(t.longitude) AS longitude,
+        if(ifNull(any(t.city), '') != '', any(t.city), concat('cell ', h.cell_id)) AS place
+    FROM cell_hits AS h
+    LEFT JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
+    GROUP BY h.cell_id
+) AS c
+GROUP BY c.place, c.state, c.country
+ORDER BY records DESC, c.place LIMIT {locations_limit:UInt32}
             """
         }
 
@@ -548,9 +597,10 @@ GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
     def locations_night() -> Dict[str, Any]:
         return {
             "description": (
-                "Top cell towers hit outside day-window hours -- both start_cell_id "
-                "and end_cell_id, so a call that moved between cells counts both -- "
-                "with full tower detail from dim_cell_tower."
+                "Top cities by the cell towers hit outside day-window hours -- both "
+                "start_cell_id and end_cell_id, so a call that moved between cells counts "
+                "both -- the towers of one city added up (cell_id, address and coordinates "
+                "are those of the city's busiest tower), top `locations_top_n`."
             ),
             "clickhouse_query": """
 WITH cell_hits AS (
@@ -569,17 +619,31 @@ WITH cell_hits AS (
            OR toHour(c.start_date_time) >= {day_end:UInt8})
 )
 SELECT
-    h.cell_id        AS cell_id,
-    count()          AS records,
-    any(t.address)   AS address,
-    any(t.city)      AS city,
-    any(t.state)     AS state,
-    any(t.country)   AS country,
-    any(t.latitude)  AS latitude,
-    any(t.longitude) AS longitude
-FROM cell_hits AS h
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
-GROUP BY cell_id ORDER BY records DESC LIMIT {limit:UInt32}
+    argMax(c.cell_id, c.cell_records)   AS cell_id,
+    sum(c.cell_records)                 AS records,
+    argMax(c.address, c.cell_records)   AS address,
+    any(c.city)                         AS city,
+    any(c.state)                        AS state,
+    any(c.country)                      AS country,
+    argMax(c.latitude, c.cell_records)  AS latitude,
+    argMax(c.longitude, c.cell_records) AS longitude
+FROM (
+    SELECT
+        h.cell_id        AS cell_id,
+        count()          AS cell_records,
+        any(t.address)   AS address,
+        any(t.city)      AS city,
+        any(t.state)     AS state,
+        any(t.country)   AS country,
+        any(t.latitude)  AS latitude,
+        any(t.longitude) AS longitude,
+        if(ifNull(any(t.city), '') != '', any(t.city), concat('cell ', h.cell_id)) AS place
+    FROM cell_hits AS h
+    LEFT JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
+    GROUP BY h.cell_id
+) AS c
+GROUP BY c.place, c.state, c.country
+ORDER BY records DESC, c.place LIMIT {locations_limit:UInt32}
             """
         }
 
@@ -620,10 +684,10 @@ SELECT
     any(t.latitude)           AS latitude,
     any(t.longitude)          AS longitude
 FROM cell_hits AS h
-INNER JOIN __CELL_TOWER__ AS t ON t.cell_id = h.cell_id
+INNER JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
 WHERE t.city != ''
 GROUP BY city, state, country
-ORDER BY records DESC LIMIT {limit:UInt32}
+ORDER BY records DESC, city, state, country LIMIT {limit:UInt32}
             """
         }
 
@@ -679,8 +743,13 @@ FROM (
     )
     GROUP BY stretch, dev
 ) AS s
-LEFT JOIN master.Tac_DB_master AS d
-    ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8)) AND d.is_current = 1
+LEFT JOIN (
+    -- only the TACs of this number's IMEIs (tac_code is the primary key)
+    SELECT * FROM master.Tac_DB_master
+    WHERE is_current = 1
+      AND tac_code IN (SELECT toUInt32OrZero(substring(replaceAll(c.imei, char(39), ''), 1, 8)) FROM fact_call_detail AS c
+                       WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String} AND c.imei != '')
+) AS d ON d.tac_code = toUInt32OrZero(substring(s.imei, 1, 8))
 GROUP BY s.imei, s.first_seen, s.last_seen, s.records
 ORDER BY s.first_seen
             """
@@ -768,7 +837,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER_OF__(SELECT start_cell_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}) AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type NOT LIKE '%sms%'
 GROUP BY call_type, direction, counterpart, start_time, end_time,
@@ -796,7 +865,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER_OF__(SELECT start_cell_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}) AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type LIKE '%sms%'
 GROUP BY call_type, direction, counterpart, start_time, end_time,
@@ -831,7 +900,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER_OF__(SELECT start_cell_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}) AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
   AND c.call_type LIKE '%sms%'
   AND c.sms_sender_id = 0
@@ -861,7 +930,7 @@ SELECT
     any(t.latitude)   AS latitude,
     any(t.longitude)  AS longitude
 FROM fact_call_detail AS c
-LEFT JOIN __CELL_TOWER__ AS t ON t.cell_id = c.start_cell_id
+LEFT JOIN __CELL_TOWER_OF__(SELECT start_cell_id FROM fact_call_detail WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}) AS t ON t.cell_id = c.start_cell_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
 GROUP BY call_type, direction, counterpart, start_time, end_time,
          duration_seconds, cell_id
@@ -878,23 +947,27 @@ LIMIT {limit:UInt32}
     def financial_sms() -> Dict[str, Any]:
         return {
             "description": (
-                "SMS from financial/bank senders, resolved via dim_sms_sender's "
-                "DLT categorization (categorization = 'Transactional') rather than "
-                "a hardcoded sender-name list."
+                "SMS from financial senders (banks, payments / fintech, lending, insurance), chosen by the sender's business "
+                "sub_category in dim_sms_sender: any sub_category containing " + ", ".join(_FINANCIAL_KEYWORDS) + " (so a new "
+                "sub_category such as 'Digital Payments' is included without a change), not by a hardcoded sender-name list. "
+                "`category` is the DLT type of the sender id (Transactional, Promotional, Service, Government): a bank sends "
+                "OTPs and offers alike. Senders whose sub_category is still Unknown are not listed."
             ),
             "clickhouse_query": """
 SELECT
     s.sender_name    AS sender,
     s.sender_id      AS sender_id,
     s.categorization AS category,
+    s.sub_category   AS sub_category,
     count()          AS messages,
     min(c.start_date_time) AS first_seen,
     max(c.start_date_time) AS last_seen
 FROM fact_call_detail AS c
-INNER JOIN master.dim_sms_sender AS s ON s.sms_sender_id = c.sms_sender_id
+-- FINAL: dim_sms_sender is a ReplacingMergeTree; a re-classified sender has two versions on disk until the parts merge
+INNER JOIN master.dim_sms_sender AS s FINAL ON s.sms_sender_id = c.sms_sender_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
-  AND s.categorization = 'Transactional'
-GROUP BY sender, sender_id, category
+  AND """ + _sql_any_word("s.sub_category", _FINANCIAL_KEYWORDS) + """
+GROUP BY sender, sender_id, category, sub_category
 ORDER BY messages DESC
             """
         }
@@ -903,24 +976,28 @@ ORDER BY messages DESC
     def ecommerce_sms() -> Dict[str, Any]:
         return {
             "description": (
-                "Call/SMS traffic from e-commerce senders, resolved via "
-                "dim_sms_sender's DLT categorization (categorization = "
-                "'Promotional') rather than a hardcoded sender-name list."
+                "Call/SMS traffic from e-commerce senders (online shops, food delivery, retail), chosen by the sender's business "
+                "sub_category in dim_sms_sender: any sub_category containing " + ", ".join(_ECOMMERCE_KEYWORDS) + " (so a new "
+                "sub_category such as 'Online Shopping' is included without a change), not by a hardcoded sender-name list. "
+                "`category` is the DLT type of the sender id (Promotional, Transactional, Service, Government). Senders whose "
+                "sub_category is still Unknown are not listed."
             ),
             "clickhouse_query": """
 SELECT
     s.sender_name    AS sender,
     s.sender_id      AS sender_id,
     s.categorization AS category,
+    s.sub_category   AS sub_category,
     countIf(c.call_type LIKE '%sms%')  AS messages,
     countIf(c.call_type NOT LIKE '%sms%') AS calls,
     min(c.start_date_time) AS first_seen,
     max(c.start_date_time) AS last_seen
 FROM fact_call_detail AS c
-INNER JOIN master.dim_sms_sender AS s ON s.sms_sender_id = c.sms_sender_id
+-- FINAL: see financial_sms
+INNER JOIN master.dim_sms_sender AS s FINAL ON s.sms_sender_id = c.sms_sender_id
 WHERE c.case_id = {case_id:UUID} AND c.target_number = {msisdn:String}
-  AND s.categorization = 'Promotional'
-GROUP BY sender, sender_id, category
+  AND """ + _sql_any_word("s.sub_category", _ECOMMERCE_KEYWORDS) + """
+GROUP BY sender, sender_id, category, sub_category
 ORDER BY messages DESC
             """
         }
@@ -1016,6 +1093,11 @@ INNER JOIN (
         any(CIRCLE)                            AS circle
     FROM dim_sdr
     WHERE SUBSCRIBER_NUMBER IS NOT NULL
+      -- only this case's B-parties: without it every SDR row (about 1 crore) is grouped to join a handful of numbers
+      AND right(toString(SUBSCRIBER_NUMBER), 10) IN (
+          SELECT right(if(caller = {msisdn:String}, receiver, caller), 10)
+          FROM fact_call_detail
+          WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String})
     GROUP BY last10
     HAVING location IS NOT NULL
 ) AS s ON s.last10 = c.b_last10
@@ -1128,7 +1210,8 @@ LIMIT 1
             "clickhouse_query": """
 SELECT `name`, `email`, `operator`, `location`, `country`, `address`, `spam score` AS spam_score
 FROM dim_truecaller
-WHERE toString(`phone number`) = {msisdn:String}
+WHERE """ + _TRUECALLER_KEY + """ = """ + _MSISDN_PROBE + """   -- dim_truecaller's sort key: an index read
+ORDER BY id DESC   -- several rows for the number: the latest loaded
 LIMIT 1
             """
         }

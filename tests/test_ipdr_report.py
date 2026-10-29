@@ -18,7 +18,7 @@ mapping = load_mapping(MAPPING_FILE)
 
 CASE = "11111111-2222-3333-4444-555555555555"
 KNOWN_BINDS = {
-    "msisdn", "case_id", "limit", "events_limit", "day_start", "day_end", "home_country_name", "usage_low", "usage_high",
+    "msisdn", "case_id", "limit", "events_limit", "locations_limit", "day_start", "day_end", "home_country_name", "usage_low", "usage_high",
     "ecommerce_domains", "financial_domains", "shared_hosting_domains",
     "counterparts", "counterparts_last10", "sustel_last10", "imeis",
 }
@@ -368,3 +368,30 @@ def test_the_full_report_endpoint_returns_the_cdr_and_the_ipdr_report(client, wi
     assert body["cdr"]["header"]["ref"] == body["ipdr"]["header"]["ref"] == "FIR 112/11 Case Satwari"
     assert "cdr_period" in body["cdr"]["header"] and "ipdr_period" in body["ipdr"]["header"]
     assert "ai_insights" in body["cdr"] and "ai_insights" in body["ipdr"]
+
+
+# ────────────────────────────────────────────────────────
+# Locations: day / night are city-wise and capped at the top 5
+# ────────────────────────────────────────────────────────
+
+def test_day_and_night_locations_are_city_wise_with_the_same_columns():
+    for key in ("day", "night"):
+        sql = next(b for b in mapping.section("locations").blocks if b.key == key).sql
+        assert "GROUP BY c.place, c.state, c.country" in sql and "LIMIT {locations_limit:UInt32}" in sql
+        for column in ("cell_id", "city", "state", "country", "latitude", "longitude", "sessions", "first_seen", "last_seen"):
+            assert f"AS {column}" in sql, column
+
+
+def test_the_locations_limit_is_five_unless_the_caller_asks_for_fewer(fake):
+    assert mapping.settings["locations_top_n"] == 5
+    assert service.build_ipdr_params(mapping, "919812345678", CASE)["locations_limit"] == 5
+    assert service.build_ipdr_params(mapping, "919812345678", CASE, limit=3)["locations_limit"] == 3
+    assert service.build_ipdr_params(mapping, "919812345678", CASE, limit=50)["locations_limit"] == 5
+
+
+def test_the_cdr_day_and_night_locations_are_city_wise_top_five():
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    for key in ("day", "night"):
+        sql = next(b for b in cdr.section("locations").blocks if b.key == key).sql
+        assert "GROUP BY c.place, c.state, c.country" in sql and "{locations_limit:UInt32}" in sql
+    assert service.build_params(cdr, "919812345678", CASE, None)["locations_limit"] == 5
