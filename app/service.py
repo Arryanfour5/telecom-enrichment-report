@@ -1,12 +1,13 @@
 """Runs sections against ClickHouse and shapes the response."""
 
+import json
 import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.db import ClickHouseError, get_client
 from app.mapping import Block, Mapping, Section
-from app.pg import PostgresError, fetch_case_header
+from app.pg import PostgresError, fetch_case_header, fetch_cases
 
 
 def _lookup_home_circle(mapping: Mapping, msisdn: str) -> str:
@@ -129,7 +130,53 @@ def run_section(section: Section, params: Dict[str, Any],
     """{block_key: value, ...} for one section. Pass a shared `errors` list to
     collect failures across multiple sections instead of one per call."""
     errs = errors if errors is not None else []
-    return {b.key: _run_block(b, params, errs, section.id) for b in section.blocks}
+    result = {b.key: _run_block(b, params, errs, section.id) for b in section.blocks}
+    if section.id == "cross_reference":
+        _enrich_cross_reference(result, str(params.get("case_id", "")), errs)
+    return result
+
+
+def _enrich_cross_reference(section: Dict[str, Any], current_case_id: str, errors: List[Dict[str, str]]) -> None:
+    """Add `cases`, one entry per OTHER case that holds the number, the way the MSISDN Intelligence Panel lists them
+    (ipdr-analytics-v2, msisdn_intelligence.build_cross_reference):
+
+        {"case_no", "concerned_unit", "owner", "date_time" ("DD-MM-YYYY HH:MM", UTC), "case_id", "action", "display"}
+
+    The cases are the rows of `case_cross_reference` (the `case_references` block, merged here and removed from the section); `action` is
+    "view" when any of a case's rows says view, else "request". The details are looked up in Postgres. A case Postgres has no name for
+    (deleted, never registered) is left out; when Postgres cannot be read nothing can be verified, so every case is listed with null details
+    and a warning. Viewable cases first, then by case name. The other blocks of the section are left as they are."""
+    rows = section.pop("case_references", None) or []
+    actions: Dict[str, str] = {}
+    for row in rows:
+        try:
+            permission = json.loads(row.get("access_permission") or "")
+        except (TypeError, ValueError):
+            continue
+        case_id = str(row.get("other_case") or "")
+        if not isinstance(permission, dict) or not case_id or case_id.lower() == current_case_id.lower():
+            continue
+        if permission.get("action") == "view":
+            actions[case_id] = "view"
+        else:
+            actions.setdefault(case_id, "request")
+    try:
+        details: Optional[Dict[str, Dict[str, Any]]] = fetch_cases(list(actions))
+    except PostgresError as e:
+        errors.append({"section": "cross_reference", "block": "postgres", "error": str(e)})
+        details = None
+    listed = []
+    for case_id, action in actions.items():
+        d = (details or {}).get(case_id) or {}
+        if details is not None and not d.get("name"):
+            continue
+        entry = {"case_no": d.get("case_no"), "concerned_unit": d.get("concerned_unit"), "owner": d.get("owner"),
+                 "date_time": d.get("date_time"), "case_id": case_id, "action": action}
+        entry["display"] = (f"Case No: {entry['case_no'] or '-'} | Concerned Unit: {entry['concerned_unit'] or '-'} | "
+                            f"Owner: {entry['owner'] or '-'} | Date and Time: {entry['date_time'] or '-'}")
+        listed.append(((d.get("name") or "").lower(), entry))
+    listed.sort(key=lambda item: (item[1]["action"] != "view", item[0], item[1]["case_id"]))
+    section["cases"] = [entry for _, entry in listed]
 
 
 def _now() -> str:
@@ -147,7 +194,7 @@ def _case_header(case_id: str, msisdn: str, errors: List[Dict[str, str]]) -> Dic
 
 
 def _header_fields(kind: str, case: Dict[str, Any], extra: Optional[Dict[str, Any]], generated_at: str) -> Dict[str, Any]:
-    """Ref / Ref date / Input gist / Analysed by / Analysed on / `<kind>_period` requested and actual, `kind` being
+    """Ref / Ref date / Input gist / Analysed by / Analysed on / Concerned officer / Concerned unit / `<kind>_period` requested and actual, `kind` being
     'cdr' or 'ipdr'. Postgres supplies the values; a caller-supplied value (the query parameters of the IPDR endpoints)
     wins over it."""
     extra = extra or {}
@@ -159,6 +206,8 @@ def _header_fields(kind: str, case: Dict[str, Any], extra: Optional[Dict[str, An
         "input_gist": extra.get("input_gist") or case.get("input_gist"),
         "analysed_by": extra.get("analysed_by") or case.get("analysed_by"),
         "analysed_on": generated_at,
+        "concerned_officer": case.get("concerned_officer"),
+        "concerned_unit": case.get("concerned_unit"),
         f"{kind}_period": {
             "requested": {"from": extra.get("period_requested_from") or requested.get("from"),
                           "to": extra.get("period_requested_to") or requested.get("to")},

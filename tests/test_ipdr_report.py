@@ -80,7 +80,8 @@ def test_cdr_cross_reference_is_the_only_cdr_reader_and_is_labelled():
 
 def test_the_number_is_matched_on_its_last_ten_digits_on_the_fact_side():
     for section_id, block in _blocks():
-        if block.source == "facts" and "fact_internet_sessions" in block.sql and block.key != "other_cases_cdr":
+        # roaming_numbers is case-wide on purpose: one row per number of the case (this number is flagged `this_number`)
+        if block.source == "facts" and "fact_internet_sessions" in block.sql and block.key not in ("other_cases_cdr", "roaming_numbers"):
             assert "right(f.device_id, 10) = right({msisdn:String}, 10)" in block.sql, f"{section_id}.{block.key}"
 
 
@@ -312,6 +313,7 @@ def test_the_one_section_endpoint_returns_the_merged_rows(client):
 
 CASE_HEADER = {
     "ref": "FIR 112/11 Case Satwari", "ref_date": "2026-10-14T05:54:00Z", "input_gist": "IPDR demo", "analysed_by": "Insp R.Sharma",
+    "concerned_officer": "Insp R.Sharma", "concerned_unit": "Counter Terrorism Unit",
     "periods": {
         "cdr": {"requested": {"from": "2026-06-01 00:00:00", "to": "2026-06-30 23:59:59"},
                 "actual": {"from": "2026-06-02 08:00:00", "to": "2026-06-29 20:00:00"}},
@@ -395,3 +397,146 @@ def test_the_cdr_day_and_night_locations_are_city_wise_top_five():
         sql = next(b for b in cdr.section("locations").blocks if b.key == key).sql
         assert "GROUP BY c.place, c.state, c.country" in sql and "{locations_limit:UInt32}" in sql
     assert service.build_params(cdr, "919812345678", CASE, None)["locations_limit"] == 5
+
+
+def test_the_header_carries_the_concerned_officer_and_unit_in_both_reports(with_case):
+    ipdr_header = service.run_ipdr_report(mapping, "919812345678", CASE, only=["header"])["header"]
+    cdr_header = service.run_report(load_mapping(MAPPING_FILE.with_name("report_mapping.py")), "919812345678", CASE)["header"]
+    for header in (ipdr_header, cdr_header):
+        assert header["concerned_officer"] == "Insp R.Sharma" and header["concerned_unit"] == "Counter Terrorism Unit"
+
+
+def test_the_concerned_officer_and_unit_are_null_when_postgres_has_none(fake):
+    header = service.run_ipdr_report(mapping, "919812345678", CASE, only=["header"])["header"]
+    assert header["concerned_officer"] is None and header["concerned_unit"] is None
+
+
+# ────────────────────────────────────────────────────────
+# States visited, and the distinct numbers of the case that roamed (CDR and IPDR); from the serving cell id only
+# ────────────────────────────────────────────────────────
+
+def test_states_visited_and_roaming_numbers_are_in_ai_insights_of_both_reports():
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    for m in (mapping, cdr):
+        blocks = {b.key: b for b in m.section("ai_insights").blocks}
+        assert "states_visited" in blocks and "roaming_numbers" in blocks
+        assert "GROUP BY place, place_type, country" in blocks["states_visited"].sql
+        numbers = blocks["roaming_numbers"].sql
+        assert "GROUP BY right(" in numbers and "{case_id:UUID}" in numbers and "this_number" in numbers   # one row per number, whichever file it is in
+        assert "{msisdn:String}" in numbers and "places_count" in numbers and "file_id" in numbers
+
+
+def test_roaming_is_read_from_the_cell_id_not_from_the_operators_circle_columns():
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    for m in (mapping, cdr):
+        for key in ("states_visited", "roaming_numbers"):
+            sql = next(b for b in m.section("ai_insights").blocks if b.key == key).sql
+            assert "dim_cell_tower" in sql and "cell_id" in sql                                   # the token is resolved when the mapping loads
+            assert "roaming_circle" not in sql and "home_circle" not in sql and "roaming_network_indicator" not in sql
+
+
+def test_the_states_of_a_number_are_counted_across_its_files_not_per_file():
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    for m in (mapping, cdr):
+        sql = next(b for b in m.section("ai_insights").blocks if b.key == "states_visited").sql
+        assert "GROUP BY place, place_type, country" in sql and "GROUP BY file_id" not in sql
+        assert "uniqExact(f.file_id)" in sql or "countDistinct(h.file_id)" in sql              # how many files, not one row per file
+
+
+def test_a_tower_with_no_state_falls_back_to_its_city_then_its_country_and_the_most_distinct_towers_come_first():
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    for m, towers in ((mapping, "ORDER BY cells DESC"), (cdr, "ORDER BY distinct_towers DESC")):
+        sql = next(b for b in m.section("ai_insights").blocks if b.key == "states_visited").sql
+        assert "AS place_type" in sql and "'state'" in sql and "'city'" in sql and "'country'" in sql
+        assert "t.state != ''" in sql or "ifNull(t.state, '') != ''" in sql
+        assert towers in sql                                                       # not only rows that have a state
+        assert "(t.state != '' OR t.city != '' OR t.country != '')" in sql or "ifNull(t.country, '') != ''" in sql
+
+
+# ────────────────────────────────────────────────────────
+# Cross reference: the other cases of the number from case_cross_reference, as the MSISDN Intelligence Panel lists them
+# ────────────────────────────────────────────────────────
+
+OTHER_A, OTHER_B, OTHER_C = ("aaaaaaaa-0000-0000-0000-00000000000a", "bbbbbbbb-0000-0000-0000-00000000000b",
+                             "cccccccc-0000-0000-0000-00000000000c")
+
+
+def _permission(case_id, action, file_id="f"):
+    import json
+    return json.dumps({"action": action, "case_id": case_id, "file_id": file_id})
+
+
+class RefRows(FakeClient):
+    """case_cross_reference: A has a request row and a view row (so it is view), B only a request, C a row that is not JSON."""
+
+    def query(self, sql, params):
+        if "FROM case_cross_reference" in sql:
+            return [{"other_case": OTHER_B, "access_permission": _permission(OTHER_B, "request")},
+                    {"other_case": OTHER_A, "access_permission": _permission(OTHER_A, "request", "f1")},
+                    {"other_case": OTHER_A, "access_permission": _permission(OTHER_A, "view", "f2")},
+                    {"other_case": OTHER_C, "access_permission": "not json"}]
+        return super().query(sql, params)
+
+
+def _details(**by_case):
+    return {cid: {"name": "n", "case_no": "D", "concerned_unit": "U", "owner": "O", "date_time": "19-10-2026 14:05", **d}
+            for cid, d in by_case.items()}
+
+
+def _cross(monkeypatch, details, run="ipdr", mapping_=None):
+    monkeypatch.setattr(service, "get_client", lambda source: RefRows())
+    monkeypatch.setattr(service, "fetch_case_header", lambda case_id, msisdn: {})
+    asked = []
+
+    def fake_cases(ids):
+        asked.append(list(ids))
+        if isinstance(details, Exception):
+            raise details
+        return details
+    monkeypatch.setattr(service, "fetch_cases", fake_cases)
+    if run == "ipdr":
+        return service.run_ipdr_report(mapping, "919812345678", CASE, only=["cross_reference"]), asked
+    cdr = load_mapping(MAPPING_FILE.with_name("report_mapping.py"))
+    return service.run_report(cdr, "919812345678", CASE, only=["cross_reference"]), asked
+
+
+def test_the_cases_come_from_case_cross_reference_by_the_last_ten_digits_without_the_current_case():
+    for m in (mapping, load_mapping(MAPPING_FILE.with_name("report_mapping.py"))):
+        sql = next(b for b in m.section("cross_reference").blocks if b.key == "case_references").sql
+        assert "FROM case_cross_reference" in sql and "right(toString(msisdn), 10) = right({msisdn:String}, 10)" in sql
+        assert "case_id != {case_id:UUID}" in sql and "AS other_case" in sql      # not `AS case_id`: the alias would shadow the column in the WHERE
+
+
+def test_each_case_is_listed_once_with_its_postgres_details_and_viewable_cases_come_first(monkeypatch):
+    report, asked = _cross(monkeypatch, _details(**{
+        OTHER_A: {"name": "Zulu", "case_no": "D001", "concerned_unit": "Unit A", "owner": "Officer A"},
+        OTHER_B: {"name": "Alpha", "case_no": "D002", "concerned_unit": "Unit B", "owner": "Officer B", "date_time": "01-01-2026 09:30"}}))
+    section = report["cross_reference"]
+    assert asked == [[OTHER_B, OTHER_A]]                                    # C's row is not JSON: skipped
+    assert [c["case_id"] for c in section["cases"]] == [OTHER_A, OTHER_B]   # view (A, though named Zulu) before request (B)
+    assert section["cases"][0] == {"case_no": "D001", "concerned_unit": "Unit A", "owner": "Officer A", "date_time": "19-10-2026 14:05",
+                                   "case_id": OTHER_A, "action": "view",
+                                   "display": "Case No: D001 | Concerned Unit: Unit A | Owner: Officer A | Date and Time: 19-10-2026 14:05"}
+    assert section["cases"][1]["action"] == "request"
+    assert "case_references" not in section and "data_sources" not in section
+    assert "other_cases" in section and "other_cases_cdr" in section        # the existing blocks are unchanged
+
+
+def test_a_case_postgres_has_no_name_for_is_left_out(monkeypatch):
+    report, _ = _cross(monkeypatch, _details(**{OTHER_A: {"name": "Alpha"}, OTHER_B: {"name": None}}))
+    assert [c["case_id"] for c in report["cross_reference"]["cases"]] == [OTHER_A]
+    report, _ = _cross(monkeypatch, {})                                     # Postgres read, but it has none of the cases
+    assert report["cross_reference"]["cases"] == []
+
+
+def test_when_postgres_cannot_be_read_every_case_is_listed_with_empty_details(monkeypatch):
+    from app.pg import PostgresError
+    report, _ = _cross(monkeypatch, PostgresError("connection refused"))
+    cases = report["cross_reference"]["cases"]
+    assert [(c["case_id"], c["action"], c["owner"]) for c in cases] == [(OTHER_A, "view", None), (OTHER_B, "request", None)]
+    assert {"section": "cross_reference", "block": "postgres", "error": "connection refused"} in report["warnings"]
+
+
+def test_the_cdr_cross_reference_has_the_same_cases_list(monkeypatch):
+    report, _ = _cross(monkeypatch, _details(**{OTHER_A: {"case_no": "D001"}, OTHER_B: {"case_no": "D002"}}), run="cdr")
+    assert [(c["case_no"], c["action"]) for c in report["cross_reference"]["cases"]] == [("D001", "view"), ("D002", "request")]

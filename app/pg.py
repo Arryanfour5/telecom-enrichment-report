@@ -5,7 +5,7 @@ Ref, Ref date, Input gist and Analysed by are on `cases`; the requested and actu
 """
 
 import datetime as dt
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import psycopg
 from psycopg.rows import dict_row
@@ -21,16 +21,26 @@ class PostgresError(RuntimeError):
 # no file of the number still returns one row (kind null), so the case fields are not lost. A number is matched on its
 # last 10 digits, like the ClickHouse facts.
 _HEADER_SQL = """
-SELECT c.reference_name, c.reference_date, c.description, c.notes, c.officer_name,
+SELECT c.reference_name, c.reference_date, c.description, c.notes, c.officer_name, u.name AS unit_name,
        f.subdomain AS kind,
        min(t.period_start) AS requested_from, max(t.period_end) AS requested_to,
        min(t.actual_start) AS actual_from,    max(t.actual_end) AS actual_to
 FROM cases AS c
+LEFT JOIN units AS u ON u.unit_id = c.group_unit_id
 LEFT JOIN telecom_metadata AS t ON t.case_id = c.case_id AND right(t.msisdn, 10) = right(%(msisdn)s, 10)
 LEFT JOIN files AS f ON f.file_id = t.file_id AND f.subdomain IN ('cdr', 'ipdr')
                     AND f.deleted_at IS NULL AND NOT f.is_trashed
 WHERE c.case_id = %(case_id)s::uuid
-GROUP BY c.case_id, f.subdomain
+GROUP BY c.case_id, u.unit_id, f.subdomain
+"""
+
+
+# The details of the cross-referenced cases: case number, owner (the case's officer), concerned unit and when the case was created.
+_CASES_SQL = """
+SELECT c.case_id::text AS case_id, c.name, c.case_number, c.officer_name, u.name AS unit_name, c.created_at
+FROM cases AS c
+LEFT JOIN units AS u ON u.unit_id = c.group_unit_id
+WHERE c.case_id = ANY(%(case_ids)s::uuid[])
 """
 
 
@@ -45,7 +55,7 @@ def _utc(value: Optional[dt.datetime]) -> Optional[str]:
 
 
 def fetch_case_header(case_id: str, msisdn: str) -> Dict[str, Any]:
-    """{ref, ref_date, input_gist, analysed_by, periods: {cdr|ipdr: {requested: {from, to}, actual: {from, to}}}},
+    """{ref, ref_date, input_gist, analysed_by, concerned_officer, concerned_unit, periods: {cdr|ipdr: {requested: {from, to}, actual: {from, to}}}},
     or {} when the case is not in Postgres. Raises PostgresError when Postgres cannot be queried."""
     try:
         with psycopg.connect(
@@ -65,9 +75,35 @@ def fetch_case_header(case_id: str, msisdn: str) -> Dict[str, Any]:
         "ref_date": _utc(first["reference_date"]),
         "input_gist": first["description"] or first["notes"],
         "analysed_by": first["officer_name"],
+        "concerned_officer": first["officer_name"],
+        "concerned_unit": first["unit_name"],
         "periods": {
             r["kind"]: {"requested": {"from": _stamp(r["requested_from"]), "to": _stamp(r["requested_to"])},
                         "actual": {"from": _stamp(r["actual_from"]), "to": _stamp(r["actual_to"])}}
             for r in rows if r["kind"]
         },
+    }
+
+
+def fetch_cases(case_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """{case_id: {name, case_no, concerned_unit, owner, date_time}} for the given cases ('DD-MM-YYYY HH:MM', UTC); a case Postgres does not
+    have is missing from the result. Raises PostgresError when Postgres cannot be queried."""
+    if not case_ids:
+        return {}
+    try:
+        with psycopg.connect(
+            host=settings.pg_host, port=settings.pg_port, user=settings.pg_user, password=settings.pg_password,
+            dbname=settings.pg_database, connect_timeout=settings.pg_connect_timeout_seconds,
+            options=f"-c statement_timeout={settings.query_timeout_seconds * 1000}", row_factory=dict_row,
+        ) as conn:
+            rows = conn.execute(_CASES_SQL, {"case_ids": list(case_ids)}).fetchall()
+    except psycopg.Error as e:
+        raise PostgresError(f"postgres {settings.pg_host}:{settings.pg_port}: {str(e).strip()[:300]}") from e
+    return {
+        r["case_id"]: {
+            "name": (r["name"] or "").strip() or None,
+            "case_no": r["case_number"], "concerned_unit": r["unit_name"], "owner": r["officer_name"],
+            "date_time": r["created_at"].astimezone(dt.timezone.utc).strftime("%d-%m-%Y %H:%M") if r["created_at"] else None,
+        }
+        for r in rows
     }

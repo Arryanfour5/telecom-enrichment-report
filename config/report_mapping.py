@@ -46,6 +46,14 @@ def _sql_any_word(column: str, words) -> str:
 
 _TRUECALLER_KEY = _msisdn_norm("ifNull(toString(`phone number`), '')")      # dim_truecaller's ORDER BY
 _MSISDN_PROBE = f"nullIf({_msisdn_norm('{msisdn:String}')}, '')"            # the asked number; no digits = NULL, matches nothing
+# dim_sdr's ORDER BY (scoutfeed-sdis-v2 SDR_KEY, scripts/migrate_dim_sdr_sort_key.py; tests pin its hash). A lookup written on it reads
+# only the asked numbers' index blocks (FIX-03); one written on toString(...) / right(..., 10) reads all ~1 crore rows.
+_SDR_KEY = _msisdn_norm("ifNull(toString(SUBSCRIBER_NUMBER), '')")
+
+
+def _probe(expr: str) -> str:
+    """The key of the numbers a lookup asks for (a String SQL expression): no digits = NULL, which matches nothing."""
+    return f"nullIf({_msisdn_norm(expr)}, '')"
 
 
 class TelecomReportMapping:
@@ -136,7 +144,7 @@ SELECT
     (SELECT argMax(`name`, id) FROM dim_truecaller
      WHERE """ + _TRUECALLER_KEY + """ = """ + _MSISDN_PROBE + """) AS truecaller_name
 FROM dim_sdr AS s
-WHERE toString(s.`SUBSCRIBER_NUMBER`) = {msisdn:String}
+WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """   -- dim_sdr's sort key: an index read
 LIMIT 1
             """
         }
@@ -171,7 +179,7 @@ SELECT nullIf(replaceRegexpOne(photo1_base64, '^data:[^,]*,', ''), '') AS photo_
                match(photo1_base64, '^data:image/[A-Za-z0-9.+-]+[;,]'), extract(photo1_base64, '^data:([^;,]+)'),
                'image/jpeg') AS photo_mime_type
 FROM dim_sdr
-WHERE right(toString(SUBSCRIBER_NUMBER), 10) = right({msisdn:String}, 10)
+WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """   -- dim_sdr's sort key: an index read
   AND ifNull(photo1_base64, '') != ''
 LIMIT 1
             """
@@ -183,7 +191,7 @@ LIMIT 1
             "description": "Every name/alias seen for the number, unioned across SDR, Truecaller, phonebook, profiler and Sustel",
             "clickhouse_query": """
 SELECT 'SDR' AS source, `SUBSCRIBER_NAME` AS value
-FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND `SUBSCRIBER_NAME` != ''
+FROM dim_sdr WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """ AND `SUBSCRIBER_NAME` != ''
 UNION ALL
 SELECT 'Truecaller', `name`
 FROM dim_truecaller WHERE """ + _TRUECALLER_KEY + """ = """ + _MSISDN_PROBE + """ AND `name` != ''
@@ -206,7 +214,7 @@ FROM __SUSTEL__ WHERE toString(`telno`) = {msisdn:String} AND `username` != ''
             "clickhouse_query": """
 SELECT `POS_ADDRESS` AS pos_address
 FROM dim_sdr
-WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
+WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """   -- dim_sdr's sort key: an index read
 LIMIT 1
             """
         }
@@ -217,7 +225,7 @@ LIMIT 1
             "description": "Alternate numbers linked to this subscriber, from SDR and Sustel",
             "clickhouse_query": """
 SELECT 'SDR' AS source, toString(`ALTERNATE_NUMBER`) AS number
-FROM dim_sdr WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String} AND toString(`ALTERNATE_NUMBER`) NOT IN ('', '0')
+FROM dim_sdr WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """ AND toString(`ALTERNATE_NUMBER`) NOT IN ('', '0')
 UNION ALL
 SELECT 'Sustel', toString(`telno0`)
 FROM __SUSTEL__ WHERE toString(`telno`) = {msisdn:String} AND toString(`telno0`) NOT IN ('', '0')
@@ -411,6 +419,85 @@ ORDER BY records DESC
         }
 
     @staticmethod
+    def states_visited() -> Dict[str, Any]:
+        return {
+            "description": (
+                "Distinct places this number has been in, resolved from every cell tower hit (start_cell_id and end_cell_id) through "
+                "dim_cell_tower: the STATE of the tower, or its CITY when the tower has no state, or its COUNTRY when it has neither "
+                "(`place_type` says which). One row per place, most distinct towers first. Counted for the number across ALL the CDR files "
+                "ingested in the case, not per file: `files` says how many files the place was seen in. `records` is countDistinct(call_id), "
+                "as in cities_visited."
+            ),
+            "clickhouse_query": """
+WITH cell_hits AS (
+    SELECT call_id, call_date, file_id, start_cell_id AS cell_id
+    FROM fact_call_detail
+    WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
+      AND start_cell_id != ''
+    UNION ALL
+    SELECT call_id, call_date, file_id, end_cell_id AS cell_id
+    FROM fact_call_detail
+    WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
+      AND end_cell_id != '' AND end_cell_id != start_cell_id
+)
+SELECT
+    multiIf(ifNull(t.state, '') != '', t.state, ifNull(t.city, '') != '', t.city, ifNull(t.country, '')) AS place,
+    multiIf(ifNull(t.state, '') != '', 'state', ifNull(t.city, '') != '', 'city', 'country') AS place_type,
+    t.country                                                    AS country,
+    countDistinct(h.cell_id)                                     AS distinct_towers,
+    countDistinct(h.call_id)                                     AS records,
+    countDistinct(h.call_date)                                   AS days,
+    arraySlice(groupUniqArrayIf(t.city, ifNull(t.city, '') != ''), 1, 10) AS cities,
+    countDistinct(h.file_id)                                     AS files,
+    min(h.call_date)                                             AS first_seen,
+    max(h.call_date)                                             AS last_seen
+FROM cell_hits AS h
+INNER JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
+WHERE ifNull(t.state, '') != '' OR ifNull(t.city, '') != '' OR ifNull(t.country, '') != ''
+GROUP BY place, place_type, country
+ORDER BY distinct_towers DESC, records DESC, place
+            """
+        }
+
+    @staticmethod
+    def roaming_numbers() -> Dict[str, Any]:
+        return {
+            "description": (
+                "Number-wise for the whole case: every target number with CDR in the case and the distinct places it has been in (every cell "
+                "tower hit, start and end, resolved through dim_cell_tower to its state, else its city, else its country), so the rows are the "
+                "distinct numbers that roamed, the most places first. The same number in several ingested files is one row, matched on its "
+                "last 10 digits. `this_number` marks the number the report is for."
+            ),
+            "clickhouse_query": """
+WITH cell_hits AS (
+    SELECT target_number, call_id, file_id, call_date, start_cell_id AS cell_id
+    FROM fact_call_detail
+    WHERE case_id = {case_id:UUID} AND start_cell_id != ''
+    UNION ALL
+    SELECT target_number, call_id, file_id, call_date, end_cell_id AS cell_id
+    FROM fact_call_detail
+    WHERE case_id = {case_id:UUID} AND end_cell_id != '' AND end_cell_id != start_cell_id
+)
+SELECT
+    argMax(h.target_number, length(h.target_number))         AS target_number,
+    right({msisdn:String}, 10) = right(h.target_number, 10)  AS this_number,
+    uniqExact(multiIf(ifNull(t.state, '') != '', t.state, ifNull(t.city, '') != '', t.city, ifNull(t.country, '')))       AS places_count,
+    arraySlice(groupUniqArray(multiIf(ifNull(t.state, '') != '', t.state, ifNull(t.city, '') != '', t.city, ifNull(t.country, ''))), 1, 10) AS places,
+    arraySlice(groupUniqArray(t.country), 1, 5)              AS countries,
+    countDistinct(h.cell_id)                                 AS distinct_towers,
+    countDistinct(h.call_id)                                 AS records,
+    countDistinct(h.file_id)                                 AS files,
+    min(h.call_date)                                         AS first_seen,
+    max(h.call_date)                                         AS last_seen
+FROM cell_hits AS h
+INNER JOIN __CELL_TOWER_OF__(SELECT cell_id FROM cell_hits) AS t ON t.cell_id = h.cell_id
+WHERE ifNull(t.state, '') != '' OR ifNull(t.city, '') != '' OR ifNull(t.country, '') != ''
+GROUP BY right(h.target_number, 10)
+ORDER BY this_number DESC, places_count DESC, distinct_towers DESC, records DESC
+            """
+        }
+
+    @staticmethod
     def roaming_summary() -> Dict[str, Any]:
         return {
             "description": (
@@ -448,7 +535,7 @@ WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String}
             "clickhouse_query": """
 SELECT `CIRCLE` AS circle
 FROM dim_sdr
-WHERE toString(`SUBSCRIBER_NUMBER`) = {msisdn:String}
+WHERE """ + _SDR_KEY + """ = """ + _MSISDN_PROBE + """   -- dim_sdr's sort key: an index read
 LIMIT 1
             """
         }
@@ -1093,9 +1180,9 @@ INNER JOIN (
         any(CIRCLE)                            AS circle
     FROM dim_sdr
     WHERE SUBSCRIBER_NUMBER IS NOT NULL
-      -- only this case's B-parties: without it every SDR row (about 1 crore) is grouped to join a handful of numbers
-      AND right(toString(SUBSCRIBER_NUMBER), 10) IN (
-          SELECT right(if(caller = {msisdn:String}, receiver, caller), 10)
+      -- only this case's B-parties, on dim_sdr's sort key (FIX-03): an index read of their numbers, not a pass over ~1 crore rows
+      AND """ + _SDR_KEY + """ IN (
+          SELECT """ + _probe("if(caller = {msisdn:String}, receiver, caller)") + """
           FROM fact_call_detail
           WHERE case_id = {case_id:UUID} AND target_number = {msisdn:String})
     GROUP BY last10
@@ -1245,6 +1332,23 @@ ORDER BY records DESC LIMIT {limit:UInt32}
             """
         }
 
+    @staticmethod
+    def cross_reference_cases() -> Dict[str, Any]:
+        return {
+            "description": (
+                "The OTHER cases that hold this number, CDR and IPDR numbers alike, from case_cross_reference (written by the ingestion "
+                "services, as the MSISDN Intelligence Panel reads it): one row per case and file that holds a number shared by two or more "
+                "cases; access_permission is {\"action\": \"view\" | \"request\", \"case_id\": ..., \"file_id\": ...}. Merged into "
+                "`cross_reference.cases` in app/service.py and removed from the section."
+            ),
+            "clickhouse_query": """
+-- The output is named other_case: an alias called case_id would shadow the column in the WHERE (String against the UUID param).
+SELECT toString(case_id) AS other_case, access_permission
+FROM case_cross_reference
+WHERE right(toString(msisdn), 10) = right({msisdn:String}, 10) AND case_id != {case_id:UUID}
+            """
+        }
+
     # ─────────────────────────────────────────────────────────────────────
     # Assembly: wires the queries above into the sections/blocks shape the
     # app (app/mapping.py) consumes.
@@ -1305,6 +1409,10 @@ ORDER BY records DESC LIMIT {limit:UInt32}
                      "sql": m.city_visits()["clickhouse_query"]},
                     {"key": "cities_visited", "source": "facts", "kind": "many",
                      "sql": m.cities_visited()["clickhouse_query"]},
+                    {"key": "states_visited", "source": "facts", "kind": "many",
+                     "sql": m.states_visited()["clickhouse_query"]},
+                    {"key": "roaming_numbers", "source": "facts", "kind": "many",
+                     "sql": m.roaming_numbers()["clickhouse_query"]},
                     {"key": "activity_span", "source": "facts", "kind": "one",
                      "sql": m.activity_span()["clickhouse_query"]},
                     {"key": "silent_gaps", "source": "facts", "kind": "many",
@@ -1403,6 +1511,8 @@ ORDER BY records DESC LIMIT {limit:UInt32}
                 "blocks": [
                     {"key": "other_cases", "source": "facts", "kind": "many",
                      "sql": m.cross_reference_other_cases()["clickhouse_query"]},
+                    {"key": "case_references", "source": "facts", "kind": "many",
+                     "sql": m.cross_reference_cases()["clickhouse_query"]},
                 ],
             },
         ]

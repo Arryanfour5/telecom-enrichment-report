@@ -37,13 +37,24 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-def _cdr_mapping():
-    """The CDR mapping class, loaded from the sibling file (see the module docstring)."""
+def _cdr_module():
+    """The CDR mapping module, loaded from the sibling file (see the module docstring)."""
     path = Path(__file__).with_name("report_mapping.py")
     spec = importlib.util.spec_from_file_location("cdr_report_mapping_reused_by_ipdr", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.TelecomReportMapping
+    return module
+
+
+def _cdr_mapping():
+    """The CDR mapping class."""
+    return _cdr_module().TelecomReportMapping
+
+
+# dim_sdr's sort key and the probe of the numbers asked (report_mapping.py, the same text as the ingestion's): FIX-03
+_CDR = _cdr_module()
+_SDR_KEY, _probe = _CDR._SDR_KEY, _CDR._probe
+_COUNTERPART_KEYS = "(SELECT " + _probe("x") + " FROM (SELECT arrayJoin({counterparts_last10:Array(String)}) AS x))"
 
 
 # One session of this number in this case. `f` is fact_internet_sessions.
@@ -322,6 +333,68 @@ LIMIT {limit:UInt32}
         }
 
     @staticmethod
+    def states_visited() -> Dict[str, Any]:
+        return {
+            "description": (
+                "Distinct places this number has been in, from the serving cell id resolved through the tower master: the STATE of the cell, "
+                "or its CITY when the tower has no state, or its COUNTRY when it has neither (`place_type` says which). One row per place, "
+                "most distinct cells first. Counted for the number across ALL the IPDR files ingested in the case, not per file: `files` "
+                "says how many files the place was seen in."
+            ),
+            "clickhouse_query": """
+SELECT
+    multiIf(t.state != '', t.state, t.city != '', t.city, t.country)  AS place,
+    multiIf(t.state != '', 'state', t.city != '', 'city', 'country')  AS place_type,
+    t.country AS country,
+    uniqExact(f.cell_id)                             AS cells,
+    count()                                          AS sessions,
+    uniqExact(f.session_date)                        AS days,
+    arraySlice(groupUniqArrayIf(t.city, t.city != ''), 1, 10) AS cities,
+    uniqExact(f.file_id)                             AS files,
+    """ + _FIRST + """                               AS first_seen,
+    """ + _LAST + """                                AS last_seen
+FROM fact_internet_sessions AS f
+INNER JOIN """ + _CELLS + """ AS t ON t.cell_id = f.cell_id
+WHERE """ + _OF_NUMBER + """ AND (t.state != '' OR t.city != '' OR t.country != '')
+GROUP BY place, place_type, country
+ORDER BY cells DESC, sessions DESC, place
+            """
+        }
+
+    @staticmethod
+    def roaming_numbers() -> Dict[str, Any]:
+        return {
+            "description": (
+                "Number-wise for the whole case: every target number with IPDR in the case and the distinct places it has been in (the serving "
+                "cell resolved through the tower master to its state, else its city, else its country), so the rows are the distinct numbers "
+                "that roamed, the most places first. The same number in several ingested files (or written 91XXXXXXXXXX in one and "
+                "XXXXXXXXXX in another) is one row, matched on its last 10 digits. `this_number` marks the number the report is for."
+            ),
+            "clickhouse_query": """
+SELECT
+    argMax(f.device_id, length(f.device_id))                 AS target_number,
+    right({msisdn:String}, 10) = right(f.device_id, 10)      AS this_number,
+    uniqExact(multiIf(t.state != '', t.state, t.city != '', t.city, t.country)) AS places_count,
+    arraySlice(groupUniqArray(multiIf(t.state != '', t.state, t.city != '', t.city, t.country)), 1, 10) AS places,
+    arraySlice(groupUniqArray(t.country), 1, 5)              AS countries,
+    uniqExact(f.cell_id)                                     AS cells,
+    count()                                                  AS sessions,
+    uniqExact(f.file_id)                                     AS files,
+    """ + _FIRST + """                                       AS first_seen,
+    """ + _LAST + """                                        AS last_seen
+FROM fact_internet_sessions AS f
+INNER JOIN (
+    SELECT cell_id, any(ifNull(city, '')) AS city, any(ifNull(state, '')) AS state, any(country) AS country
+    FROM __CELL_TOWER_OF__(SELECT cell_id FROM fact_internet_sessions WHERE case_id = {case_id:UUID})
+    GROUP BY cell_id
+) AS t ON t.cell_id = f.cell_id
+WHERE f.case_id = {case_id:UUID} AND (t.state != '' OR t.city != '' OR t.country != '')
+GROUP BY right(f.device_id, 10)
+ORDER BY this_number DESC, places_count DESC, cells DESC, sessions DESC
+            """
+        }
+
+    @staticmethod
     def last_ipdr_date() -> Dict[str, Any]:
         return {
             "description": "The last date of the IPDR period for this number.",
@@ -546,7 +619,7 @@ SELECT right(toString(`SUBSCRIBER_NUMBER`), 10) AS b_party_number,
        any(coalesce(nullIf(`LOCAL_ADDRESS`, ''), nullIf(`PERMANENT_ADDRESS`, ''))) AS location,
        any(`CIRCLE`) AS circle
 FROM dim_sdr
-WHERE right(toString(`SUBSCRIBER_NUMBER`), 10) IN {counterparts_last10:Array(String)}
+WHERE """ + _SDR_KEY + """ IN """ + _COUNTERPART_KEYS + """   -- dim_sdr's sort key: an index read of these numbers
 GROUP BY b_party_number
 ORDER BY b_party_number
 LIMIT {limit:UInt32}
@@ -771,7 +844,7 @@ LIMIT {limit:UInt32}
 SELECT right(toString(`SUBSCRIBER_NUMBER`), 10) AS b_party_number,
        any(`SUBSCRIBER_NAME`) AS subscriber_name
 FROM dim_sdr
-WHERE right(toString(`SUBSCRIBER_NUMBER`), 10) IN {counterparts_last10:Array(String)}
+WHERE """ + _SDR_KEY + """ IN """ + _COUNTERPART_KEYS + """   -- dim_sdr's sort key: an index read of these numbers
 GROUP BY b_party_number
 ORDER BY b_party_number
 LIMIT 500
@@ -890,6 +963,8 @@ LIMIT {limit:UInt32}
                 block("international_roaming", "facts", "many", m.international_roaming()),
                 block("frequent_roaming", "facts", "many", m.frequent_roaming()),
                 block("city_visits", "facts", "many", m.city_visits()),
+                block("states_visited", "facts", "many", m.states_visited()),
+                block("roaming_numbers", "facts", "many", m.roaming_numbers()),
                 block("last_ipdr_date", "facts", "value", m.last_ipdr_date()),
             ]},
             {"id": "locations", "title": "Section 2 - Locations", "panel": "right", "blocks": [
@@ -950,6 +1025,7 @@ LIMIT {limit:UInt32}
             {"id": "cross_reference", "title": "Section 14 - Cross Reference", "panel": "right", "blocks": [
                 block("other_cases", "facts", "many", m.cross_reference_other_cases()),
                 block("other_cases_cdr", "facts", "many", m.cross_reference_other_cases_cdr()),
+                block("case_references", "facts", "many", c.cross_reference_cases()),
             ]},
         ]
 

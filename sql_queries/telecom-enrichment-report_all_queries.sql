@@ -22,18 +22,19 @@ SELECT count() AS n FROM system.tables WHERE database = {d:String} AND name = 'd
 -- Q002  _HEADER_SQL   [PostgreSQL]
 -- File:    app/pg.py:23
 -- Purpose: One row per file kind of this number in this case.
--- Tables:  postgres: cases, postgres: telecom_metadata, postgres: files
+-- Tables:  postgres: cases, postgres: units, postgres: telecom_metadata, postgres: files
 -- ------------------------------------------------------------------------------------------------------------
-SELECT c.reference_name, c.reference_date, c.description, c.notes, c.officer_name,
+SELECT c.reference_name, c.reference_date, c.description, c.notes, c.officer_name, u.name AS unit_name,
        f.subdomain AS kind,
        min(t.period_start) AS requested_from, max(t.period_end) AS requested_to,
        min(t.actual_start) AS actual_from,    max(t.actual_end) AS actual_to
 FROM cases AS c
+LEFT JOIN units AS u ON u.unit_id = c.group_unit_id
 LEFT JOIN telecom_metadata AS t ON t.case_id = c.case_id AND right(t.msisdn, 10) = right(%(msisdn)s, 10)
 LEFT JOIN files AS f ON f.file_id = t.file_id AND f.subdomain IN ('cdr', 'ipdr')
                     AND f.deleted_at IS NULL AND NOT f.is_trashed
 WHERE c.case_id = %(case_id)s::uuid
-GROUP BY c.case_id, f.subdomain;
+GROUP BY c.case_id, u.unit_id, f.subdomain;
 
 -- ============================================================================================================
 -- FILE config/ipdr_report_mapping.py   (27 queries)

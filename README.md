@@ -132,6 +132,8 @@ These are not in ClickHouse; `app/pg.py` reads them from the case-management Pos
 | Ref / Ref date | `cases.reference_name` / `cases.reference_date` |
 | Input gist | `cases.description` (`cases.notes` when empty) |
 | Analysed by | `cases.officer_name` |
+| Concerned officer | `cases.officer_name` |
+| Concerned unit | `units.name` of `cases.group_unit_id` |
 | Analysed on | the time the report was generated |
 | Period requested | `telecom_metadata.period_start` / `period_end` of the number's files |
 | Period actual | `telecom_metadata.actual_start` / `actual_end` of the number's files |
@@ -204,6 +206,19 @@ facts and dims may be on different servers, so they are never joined in SQL.
 - *Websites used*: IPDR has no URLs, so a site is recognised by the destination IP's AS domain (exact match against
   `ecommerce_domains` / `financial_domains`). Cloud and CDN domains (AWS, CloudFront, Akamai, Google ...) cannot be told
   apart from the shops hosted on them, so they are listed apart in `shared_hosting` and never counted as e-commerce.
+- *States visited / roaming numbers* (`ai_insights.states_visited`, `ai_insights.roaming_numbers`, CDR and IPDR): read from the serving cell id only (resolved through the tower master,
+  `<CH_FACTS_DATABASE>.dim_cell_tower`), not from the operator's circle columns. A place is the tower's STATE, or its CITY when the tower has no state, or its COUNTRY when it has neither
+  (`place_type`: `state` / `city` / `country`). `states_visited` is one row per place the number was in (distinct cells / towers, sessions or records, days, up to 10 cities, `files`, first / last
+  seen), most distinct cells first, counted across **all** the files ingested in the case, not per file. `roaming_numbers` is the case-wide view: one row per target number with CDR / IPDR in the
+  case (matched on the last 10 digits, so one number in several files or written two ways is one row) with `places_count`, `places`, `countries` and `this_number` for the number the report is for,
+  the most places first -- the rows are the distinct numbers that roamed.
+- *Cross reference* (`cross_reference.cases`, CDR and IPDR): the OTHER cases that hold the number, the way the MSISDN Intelligence Panel lists them (ipdr-analytics-v2
+  `build_cross_reference`). The cases are the rows of ClickHouse `case_cross_reference` (`msisdn`, `case_id`, `access_permission`; written by the ingestion services; matched on the last 10
+  digits, the current case left out). Each entry is `{"case_no", "concerned_unit", "owner", "date_time" ("DD-MM-YYYY HH:MM", UTC), "case_id", "action", "display"}`, `display` being the
+  bullet line `Case No: D001 | Concerned Unit: Unit A | Owner: Officer A | Date and Time: 19-10-2026 14:05`. `action` is `view` when any row of the case says view, else `request`; viewable
+  cases come first, then by case name. Details from Postgres: `cases.case_number`, `cases.officer_name`, `cases.created_at`, `units.name` (through `cases.group_unit_id`). A case Postgres has
+  no name for (deleted, never registered) is left out; if Postgres cannot be read every case is listed with null details and a `warnings` entry. The older `other_cases` /
+  `other_cases_cdr` blocks (a scan of the fact tables, capped by `limit`) are unchanged.
 - *Repeated rows* (CDR and IPDR): `name_alias.names` and `alternate_numbers.numbers` show a value once **per source** -- when one source (e.g. the SDR, which can hold
   several records of a number) returns the same name or number twice, the first row is kept; the Profiler, Phonebook, Truecaller, SDR and Sustel each still show their
   own row. `imei.imei_dim_hits`, `ai_insights.sustel_match` / `profiler_match` / `sustel_hits` and `sustel.matches` drop only rows identical in every column.

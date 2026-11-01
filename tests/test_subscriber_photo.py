@@ -6,10 +6,13 @@ def _photo_sql():
     return rm.TelecomReportMapping.subscriber_photo()["clickhouse_query"]
 
 
-def test_the_photo_query_reads_dim_sdr_on_the_last_ten_digits_of_the_subscriber_number():
-    sql = " ".join(_photo_sql().split())
+def test_the_photo_query_reads_dim_sdr_on_its_sort_key():
+    """dim_sdr's country-aware number key (FIX-03): 9812345678 and 919812345678 meet, and the read is an index read, not a pass over
+    every SDR row as `right(toString(SUBSCRIBER_NUMBER), 10) = ...` was."""
+    from config.report_mapping import _MSISDN_PROBE, _SDR_KEY
+    sql = _photo_sql()
     assert "FROM dim_sdr" in sql and "photo1_base64" in sql
-    assert "right(toString(SUBSCRIBER_NUMBER), 10) = right({msisdn:String}, 10)" in sql
+    assert _SDR_KEY + " = " + _MSISDN_PROBE in sql
     assert "ifNull(photo1_base64, '') != ''" in sql
 
 
